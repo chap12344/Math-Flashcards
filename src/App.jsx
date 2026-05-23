@@ -105,7 +105,7 @@ export default function App() {
   useEffect(() => {
     const fetchGames = async () => {
       try {
-        const res = await fetch('/games/index.json');
+        const res = await fetch('games/index.json');
         const data = await res.json();
         
         // Grab custom built locally stored games
@@ -126,7 +126,7 @@ export default function App() {
   // Handle Tab title and Icon Cloaking side effects
   useEffect(() => {
     let originalTitle = "Unblocked Games";
-    let originalFavicon = "/favicon.ico";
+    let originalFavicon = "favicon.ico";
 
     const updateMetadata = () => {
       if (isCloaked) {
@@ -187,7 +187,7 @@ export default function App() {
       setIsLoading(false);
     } else {
       try {
-        const res = await fetch(`/games/${gameId}.json`);
+        const res = await fetch(`games/${gameId}.json`);
         const item = await res.json();
         setSelectedGameData(item);
         setForceBlankMathMode(item.useBlankMath);
