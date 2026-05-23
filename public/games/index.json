@@ -1,0 +1,47 @@
+[
+  {
+    "id": "snake",
+    "title": "Retro Snake",
+    "description": "Feed your snake and avoid crashing into the walls or your own tail. Styled with bright retro arcade accents.",
+    "category": "Classic",
+    "icon": "Snake",
+    "useBlankMath": true,
+    "iframeUrl": "about:blank"
+  },
+  {
+    "id": "pong",
+    "title": "Cyber Pong",
+    "description": "High-octane tabletop tennis with particle collision trails, customizable difficulty, and local split-screen controls.",
+    "category": "Classic",
+    "icon": "Gamepad2",
+    "useBlankMath": true,
+    "iframeUrl": "about:blank"
+  },
+  {
+    "id": "breakout",
+    "title": "Brick Breaker",
+    "description": "Smash layers of retro blocks using bouncy energy power-ups, paddle modifications, and multi-ball triggers.",
+    "category": "Arcade",
+    "icon": "Box",
+    "useBlankMath": true,
+    "iframeUrl": "about:blank"
+  },
+  {
+    "id": "flappy",
+    "title": "Retro Flappy",
+    "description": "Flap through random, colorful pixel-art pipes in this fast-paced arcade velocity game.",
+    "category": "Action",
+    "icon": "Bird",
+    "useBlankMath": true,
+    "iframeUrl": "about:blank"
+  },
+  {
+    "id": "mathquiz",
+    "title": "Speed Math Challenge",
+    "description": "Test your reflexes and basic operations under a ticking retro timer. Perfect for pretending to be studying!",
+    "category": "Math",
+    "icon": "Calculator",
+    "useBlankMath": true,
+    "iframeUrl": "about:blank"
+  }
+]
