@@ -1,6 +1,6 @@
 {
-  "name": "Unblocked Games",
-  "description": "A clean library of classic browser games loaded in isolated frames, featuring customizable layouts and filter evasion support.",
+  "name": "Math Flashcards",
+  "description": "An interactive, highly polished, and intuitive math flashcards application designed for practicing addition, subtraction, multiplication, and division across multiple difficulty levels.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

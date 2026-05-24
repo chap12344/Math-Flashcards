@@ -3,1250 +3,1479 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, 
-  RotateCcw, 
-  Maximize2, 
-  Plus, 
-  X, 
-  BookOpen, 
-  FileText, 
-  Laptop, 
-  ChevronRight, 
-  Trash2,
-  EyeOff
+  Plus, Minus, Check, X, RotateCcw, Award, Sparkles, BookOpen, 
+  Settings, HelpCircle, ChevronRight, RefreshCw, Trash2, Edit2, 
+  Volume2, VolumeX, Eye, Info, PenTool, Eraser, Calendar, AlertTriangle,
+  Gamepad2, EyeOff, Shield, ShieldAlert, Monitor, ArrowLeft, Maximize, ExternalLink, Laptop, Save, FileText, Download, Upload
 } from 'lucide-react';
 
-const CLOAK_PRESETS = [
-  {
-    id: 'gdocs',
-    name: 'Google Docs',
-    title: 'Semester Study Notes - Google Docs',
-    favicon: 'https://ssl.gstatic.com/docs/documents/images/kix-favicon-7.ico',
-    iconSrc: '📄'
+const STORAGE_STATS_KEY = 'math_flashcards_stats_v3';
+const STORAGE_MISTAKES_KEY = 'math_flashcards_mistakes_v3';
+const STORAGE_CLOAK_KEY = 'games_tab_cloak_v1';
+const STORAGE_LOCAL_GAMES_KEY = 'games_local_custom_v1';
+
+// Tab Cloak Presets definitions with actual public secure SVG/PNG icon URLs
+const CLOAK_PRESETS = {
+  none: {
+    title: 'Math Flashcards',
+    icon: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=32&h=32&q=80', // Beautiful soft icon
   },
-  {
-    id: 'classroom',
-    name: 'Google Classroom',
-    title: 'Google Classroom',
-    favicon: 'https://ssl.gstatic.com/onebox/media/classroom/classroom_favicon_v2.ico',
-    iconSrc: '🏫'
+  drive: {
+    title: 'My Drive - Google Drive',
+    icon: 'https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_32dp.png'
   },
-  {
-    id: 'canvas',
-    name: 'Canvas LMS Dashboard',
-    title: 'Dashboard - Canvas LMS',
-    favicon: 'https://du11hjcvx0uqb.cloudfront.net/dist/images/favicon-e05d21095a.ico',
-    iconSrc: '🎨'
+  classroom: {
+    title: 'Home | Google Classroom',
+    icon: 'https://www.gstatic.com/classroom/logo_square_rounded_32.png'
   },
-  {
-    id: 'calculator',
-    name: 'Graphing Practice',
-    title: 'Scientific Calculator v4.02',
-    favicon: 'https://www.google.com/images/branding/product/ico/calculator_logo_32dp.png',
-    iconSrc: '🧮'
+  docs: {
+    title: 'Google Docs',
+    icon: 'https://ssl.gstatic.com/docs/documents/images/kix-favicon7.ico'
+  },
+  canvas: {
+    title: 'Dashboard | Canvas',
+    icon: 'https://du11hjcvx0uqb.cloudfront.net/br/v1.27.0/images/favicon-canvas.ico'
+  },
+  powerschool: {
+    title: 'PowerSchool',
+    icon: 'https://www.powerschool.com/wp-content/themes/powerschool/favicon.ico'
   }
-];
+};
+
+// Tone synthesizer helper
+const playSynthTone = (freq, duration, type = 'sine', soundEnabled = true) => {
+  if (!soundEnabled) return;
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    
+    gainNode.gain.setValueAtTime(0.04, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+    
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+  } catch (err) {
+    // browser audio permissions lock
+  }
+};
+
+// Math Helpers
+const generateParamsForDifficulty = (op, diff) => {
+  let lower1 = 1, upper1 = 10;
+  let lower2 = 1, upper2 = 10;
+
+  if (op === 'add' || op === 'sub') {
+    if (diff === 'easy') { lower1 = 1; upper1 = 12; lower2 = 1; upper2 = 12; }
+    else if (diff === 'medium') { lower1 = 10; upper1 = 60; lower2 = 5; upper2 = 40; }
+    else if (diff === 'hard') { lower1 = 50; upper1 = 200; lower2 = 10; upper2 = 150; }
+  } else if (op === 'mul' || op === 'div') {
+    if (diff === 'easy') { lower1 = 1; upper1 = 10; lower2 = 1; upper2 = 10; }
+    else if (diff === 'medium') { lower1 = 2; upper1 = 12; lower2 = 2; upper2 = 12; }
+    else if (diff === 'hard') { lower1 = 11; upper1 = 25; lower2 = 3; upper2 = 18; }
+  }
+  return { lower1, upper1, lower2, upper2 };
+};
+
+const generateCard = (op, diff, customL1, customU1, customL2, customU2) => {
+  const possibleOps = ['add', 'sub', 'mul', 'div'];
+  const finalOp = op === 'mixed' ? possibleOps[Math.floor(Math.random() * 4)] : op;
+  
+  let lower1, upper1, lower2, upper2;
+  if (diff === 'custom') {
+    lower1 = customL1; upper1 = customU1; lower2 = customL2; upper2 = customU2;
+  } else {
+    const params = generateParamsForDifficulty(finalOp, diff);
+    lower1 = params.lower1; upper1 = params.upper1; lower2 = params.lower2; upper2 = params.upper2;
+  }
+
+  let num1 = Math.floor(Math.random() * (upper1 - lower1 + 1)) + lower1;
+  let num2 = Math.floor(Math.random() * (upper2 - lower2 + 1)) + lower2;
+  let operatorSymbol = '+';
+  let answer = 0;
+
+  switch (finalOp) {
+    case 'add':
+      operatorSymbol = '+';
+      answer = num1 + num2;
+      break;
+    case 'sub':
+      operatorSymbol = '−';
+      if (num1 < num2) { const t = num1; num1 = num2; num2 = t; }
+      answer = num1 - num2;
+      break;
+    case 'mul':
+      operatorSymbol = '×';
+      answer = num1 * num2;
+      break;
+    case 'div':
+      operatorSymbol = '÷';
+      if (num2 === 0) num2 = 1;
+      const quotient = Math.floor(Math.random() * (upper1 - lower1 + 1)) + lower1;
+      num1 = num2 * quotient;
+      answer = quotient;
+      break;
+  }
+
+  return {
+    id: `card-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    num1,
+    num2,
+    operation: finalOp,
+    operatorSymbol,
+    answer
+  };
+};
 
 export default function App() {
-  // Navigation & Data
-  const [games, setGames] = useState([]);
-  const [selectedGameId, setSelectedGameId] = useState(null);
-  const [selectedGameData, setSelectedGameData] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState('All Games');
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // Custom Game Creation
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newGameTitle, setNewGameTitle] = useState('');
-  const [newGameDesc, setNewGameDesc] = useState('');
-  const [newGameCat, setNewGameCat] = useState('Classic');
-  const [newGameCode, setNewGameCode] = useState('');
-  const [newGameUseBlank, setNewGameUseBlank] = useState(true);
-
-  // Evasion Frame Options
-  const [forceBlankMathMode, setForceBlankMathMode] = useState(true);
-  const [iframeKey, setIframeKey] = useState(0); 
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // School Cover / Cloaking system
-  const [isCloaked, setIsCloaked] = useState(false);
-  const [selectedCloak, setSelectedCloak] = useState(CLOAK_PRESETS[0]);
-  const [showCloakMenu, setShowCloakMenu] = useState(false);
-  
-  // Simulated school notes
-  const [schoolNotes, setSchoolNotes] = useState(() => {
-    return localStorage.getItem('school_notes') || 
-      "Algebra 2 - Semester Examination Study Log\n" +
-      "============================================\n\n" +
-      "1. Quadratic Equations:\n" +
-      "   Standard Form formula: ax^2 + bx + c = 0\n" +
-      "   Quadratic formula: x = [-b \u00B1 \u221A(b^2 - 4ac)] / 2a\n" +
-      "   Note: Discriminant D = b^2 - 4ac determines the type of roots.\n" +
-      "   - If D > 0, roots are real and distinct.\n" +
-      "   - If D = 0, root is real and repeated.\n" +
-      "   - If D < 0, roots are complex conjugates.\n\n" +
-      "2. Exponential Growth & Decay:\n" +
-      "   y = a(1 + r)^t or y = ae^(kt)\n" +
-      "   Remember: constant rate calculations must match units of compounding semesters.\n\n" +
-      "3. Scratch notes:\n" +
-      "   - Complete homework question #14 to #22 by Monday.\n" +
-      "   - Review logarithms base transform theorem.";
+  // Lifetime stats and mistake deck models saved in localStorage
+  const [lifetimeStats, setLifetimeStats] = useState(() => {
+    try {
+      const data = localStorage.getItem(STORAGE_STATS_KEY);
+      return data ? JSON.parse(data) : { totalChecked: 0, totalCorrect: 0, streak: 0, lastPlayed: null, history: [] };
+    } catch {
+      return { totalChecked: 0, totalCorrect: 0, streak: 0, lastPlayed: null, history: [] };
+    }
   });
 
-  const [calcDisplay, setCalcDisplay] = useState('0');
-  const [calcMemory, setCalcMemory] = useState('');
-  const [calcOperation, setCalcOperation] = useState('');
-  const [calcResetOnNextInput, setCalcResetOnNextInput] = useState(false);
-
-  // Read initial games list on load
-  useEffect(() => {
-    const fetchGames = async () => {
-      try {
-        const res = await fetch('games/index.json');
-        const data = await res.json();
-        
-        // Grab custom built locally stored games
-        const localGamesRaw = localStorage.getItem('unblocked_custom_games');
-        if (localGamesRaw) {
-          const localGames = JSON.parse(localGamesRaw);
-          setGames([...data, ...localGames]);
-        } else {
-          setGames(data);
-        }
-      } catch (err) {
-        console.error("Failed loading unblocked games directory:", err);
-      }
-    };
-    fetchGames();
-  }, [showAddModal]);
-
-  // Handle Tab title and Icon Cloaking side effects
-  useEffect(() => {
-    let originalTitle = "Unblocked Games";
-    let originalFavicon = "favicon.ico";
-
-    const updateMetadata = () => {
-      if (isCloaked) {
-        document.title = selectedCloak.title;
-        let link = document.querySelector("link[rel~='icon']");
-        if (!link) {
-          link = document.createElement('link');
-          link.rel = 'icon';
-          document.getElementsByTagName('head')[0].appendChild(link);
-        }
-        link.href = selectedCloak.favicon;
-      } else {
-        document.title = originalTitle;
-        let link = document.querySelector("link[rel~='icon']");
-        if (link) {
-          link.href = originalFavicon;
-        }
-      }
-    };
-
-    updateMetadata();
-
-    return () => {
-      document.title = originalTitle;
-    };
-  }, [isCloaked, selectedCloak]);
-
-  // Escape key global panic trigger
-  useEffect(() => {
-    const handleGlobalPanic = (e) => {
-      if (e.key === 'Escape') {
-        setIsCloaked(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleGlobalPanic);
-    return () => window.removeEventListener('keydown', handleGlobalPanic);
-  }, []);
-
-  const handleNotesChange = (text) => {
-    setSchoolNotes(text);
-    localStorage.setItem('school_notes', text);
-  };
-
-  const handleSelectGame = async (gameId) => {
-    setIsLoading(true);
-    setSelectedGameId(gameId);
-    
-    const localStoreGamesRaw = localStorage.getItem('unblocked_custom_games_detailed');
-    let localFound = null;
-    if (localStoreGamesRaw) {
-      const storageDetails = JSON.parse(localStoreGamesRaw);
-      localFound = storageDetails.find(g => g.id === gameId);
-    }
-
-    if (localFound) {
-      setSelectedGameData(localFound);
-      setForceBlankMathMode(localFound.useBlankMath);
-      setIsLoading(false);
-    } else {
-      try {
-        const res = await fetch(`games/${gameId}.json`);
-        const item = await res.json();
-        setSelectedGameData(item);
-        setForceBlankMathMode(item.useBlankMath);
-        setIsLoading(false);
-      } catch (err) {
-        console.error("Failed fetching self-contained game file:", err);
-        setIsLoading(false);
-        setSelectedGameId(null);
-      }
-    }
-  };
-
-  const writeIframeContent = (iframeRef) => {
-    if (!iframeRef || !selectedGameData) return;
+  const [mistakes, setMistakes] = useState(() => {
     try {
-      const doc = iframeRef.contentDocument || iframeRef.contentWindow?.document;
-      if (doc) {
-        doc.open();
-        doc.write(selectedGameData.html);
-        doc.close();
+      const data = localStorage.getItem(STORAGE_MISTAKES_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [cloakPreset, setCloakPreset] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_CLOAK_KEY) || 'none';
+    } catch {
+      return 'none';
+    }
+  });
+
+  const [localGames, setLocalGames] = useState(() => {
+    try {
+      const data = localStorage.getItem(STORAGE_LOCAL_GAMES_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Settings
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  
+  // Dashboard setups
+  const [screen, setScreen] = useState('dashboard'); // 'dashboard', 'practice', 'stealth-console'
+  const [practiceType, setPracticeType] = useState('flashcard'); // 'flashcard', 'quiz'
+  const [operation, setOperation] = useState('add'); // 'add', 'sub', 'mul', 'div', 'mixed'
+  const [difficulty, setDifficulty] = useState('easy'); // 'easy', 'medium', 'hard', 'custom'
+  
+  // Custom range bounds
+  const [lowerBound1, setLowerBound1] = useState(1);
+  const [upperBound1, setUpperBound1] = useState(20);
+  const [lowerBound2, setLowerBound2] = useState(1);
+  const [upperBound2, setUpperBound2] = useState(20);
+
+  // Active practice variables
+  const [targetDeck, setTargetDeck] = useState([]);
+  const [deckIndex, setDeckIndex] = useState(0);
+  const [isFlipped, setIsFlipped] = useState(false);
+  const [reviewMistakesMode, setReviewMistakesMode] = useState(false);
+
+  // Speed Quiz session properties
+  const [quizSize, setQuizSize] = useState(10);
+  const [userInputsValue, setUserInputsValue] = useState('');
+  const [quizTimer, setQuizTimer] = useState(0);
+  const [quizResults, setQuizResults] = useState(null); 
+  const [evaluationFeedback, setEvaluationFeedback] = useState(null); // 'correct' | 'incorrect'
+  
+  // Stealth Console variables
+  const [gamesList, setGamesList] = useState([]);
+  const [isLoadingGames, setIsLoadingGames] = useState(false);
+  const [gamesError, setGamesError] = useState(null);
+  const [selectedGame, setSelectedGame] = useState(null);
+  const [gameSearch, setGameSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  
+  const [showGameManager, setShowGameManager] = useState(false);
+  const [mgmtGameName, setMgmtGameName] = useState('');
+  const [mgmtGameUrl, setMgmtGameUrl] = useState('');
+  const [mgmtGameCat, setMgmtGameCat] = useState('Arcade');
+  const [mgmtGameDesc, setMgmtGameDesc] = useState('');
+
+  const timerIntervalRef = useRef(null);
+
+  // Sync state helpers to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_STATS_KEY, JSON.stringify(lifetimeStats));
+  }, [lifetimeStats]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_MISTAKES_KEY, JSON.stringify(mistakes));
+  }, [mistakes]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_LOCAL_GAMES_KEY, JSON.stringify(localGames));
+  }, [localGames]);
+
+  // Execute Dynamic Favicon and Title Switch side effects
+  useEffect(() => {
+    try {
+      const preset = CLOAK_PRESETS[cloakPreset] || CLOAK_PRESETS.none;
+      
+      // Update Title
+      document.title = preset.title;
+      
+      // Update Favicon Link
+      let link = document.querySelector("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = preset.icon;
+      localStorage.setItem(STORAGE_CLOAK_KEY, cloakPreset);
+    } catch (e) {
+      console.error("Failed to update tab cloaking", e);
+    }
+  }, [cloakPreset]);
+
+  // Backtick " ` " keystoke to instantly open or instantly escape to mask mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === '`') {
+        e.preventDefault();
+        playSynthTone(600, 0.08, 'square', soundEnabled);
+        
+        if (screen === 'stealth-console' || selectedGame) {
+          // Immediately hide and restore standard mask dashboard!
+          setSelectedGame(null);
+          setScreen('dashboard');
+        } else {
+          // Enter stealth console
+          setScreen('stealth-console');
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [screen, selectedGame, soundEnabled]);
+
+  // Speed timer logic
+  useEffect(() => {
+    if (screen === 'practice' && practiceType === 'quiz' && !quizResults) {
+      timerIntervalRef.current = setInterval(() => {
+        setQuizTimer((t) => t + 1);
+      }, 1000);
+    } else {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    }
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    };
+  }, [screen, practiceType, quizResults]);
+
+  // Fetch index.json games from repo or fallback cleanly
+  const fetchHostedGames = async () => {
+    setIsLoadingGames(true);
+    setGamesError(null);
+    try {
+      const res = await fetch('games/index.json');
+      if (!res.ok) {
+        throw new Error(`Failed to load games config index.json (${res.status})`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setGamesList(data);
+      } else {
+        setGamesList([]);
       }
     } catch (err) {
-      console.error("Evasion frame writes forbidden by system boundaries:", err);
+      console.warn("Could not load /games/index.json. Fallback to storage or custom settings instruction is available.", err);
+      // Don't crash, let it succeed but show simple user instructions on how to put files in folder
+      setGamesList([]);
+      setGamesError(err.message);
+    } finally {
+      setIsLoadingGames(false);
     }
   };
 
-  const handleAddCustomGame = () => {
-    if (!newGameTitle || !newGameCode) return;
-    const cleanId = 'custom-' + Date.now();
-    const newMeta = {
-      id: cleanId,
-      title: newGameTitle,
-      description: newGameDesc || "Self-crafted custom sandbox game injected into unblocked library.",
-      category: "Custom",
-      icon: "Gamepad",
-      useBlankMath: newGameUseBlank,
-      iframeUrl: "about:blank"
-    };
+  useEffect(() => {
+    fetchHostedGames();
+  }, []);
 
-    const newDetailed = {
-      ...newMeta,
-      html: newGameCode
-    };
-
-    const existingListRaw = localStorage.getItem('unblocked_custom_games') || '[]';
-    const list = JSON.parse(existingListRaw);
-    list.push(newMeta);
-    localStorage.setItem('unblocked_custom_games', JSON.stringify(list));
-
-    const existingDetailedRaw = localStorage.getItem('unblocked_custom_games_detailed') || '[]';
-    const detailedList = JSON.parse(existingDetailedRaw);
-    detailedList.push(newDetailed);
-    localStorage.setItem('unblocked_custom_games_detailed', JSON.stringify(detailedList));
-
-    setNewGameTitle('');
-    setNewGameDesc('');
-    setNewGameCode('');
-    setNewGameCat('Classic');
-    setShowAddModal(false);
-  };
-
-  const handleDeleteCustomGame = (gameId, e) => {
-    e.stopPropagation();
-    
-    const existingListRaw = localStorage.getItem('unblocked_custom_games') || '[]';
-    const list = JSON.parse(existingListRaw);
-    const filteredList = list.filter(g => g.id !== gameId);
-    localStorage.setItem('unblocked_custom_games', JSON.stringify(filteredList));
-
-    const existingDetailedRaw = localStorage.getItem('unblocked_custom_games_detailed') || '[]';
-    const detailedList = JSON.parse(existingDetailedRaw);
-    const filteredDetailedList = detailedList.filter(g => g.id !== gameId);
-    localStorage.setItem('unblocked_custom_games_detailed', JSON.stringify(filteredDetailedList));
-
-    const freshGames = games.filter(g => g.id !== gameId);
-    setGames(freshGames);
-
-    if (selectedGameId === gameId) {
-      setSelectedGameId(null);
-      setSelectedGameData(null);
-    }
-  };
-
-  const handleCalcBtn = (val) => {
-    playTone(350, 0.05);
-    if (val === 'C') {
-      setCalcDisplay('0');
-      setCalcMemory('');
-      setCalcOperation('');
-    } else if (val === '=') {
-      if (!calcMemory || !calcOperation) return;
-      const num1 = parseFloat(calcMemory);
-      const num2 = parseFloat(calcDisplay);
-      let res = 0;
-      switch (calcOperation) {
-        case '+': res = num1 + num2; break;
-        case '-': res = num1 - num2; break;
-        case '*': res = num1 * num2; break;
-        case '/': res = num2 !== 0 ? num1 / num2 : 0; break;
-        case '^': res = Math.pow(num1, num2); break;
-      }
-      setCalcDisplay(String(Number(res.toFixed(10))));
-      setCalcMemory('');
-      setCalcOperation('');
-      setCalcResetOnNextInput(true);
-    } else if (['+', '-', '*', '/', '^'].includes(val)) {
-      setCalcMemory(calcDisplay);
-      setCalcOperation(val);
-      setCalcResetOnNextInput(true);
-    } else if (['sin', 'cos', 'tan', 'sqrt', 'log'].includes(val)) {
-      const num = parseFloat(calcDisplay);
-      let res = 0;
-      if (val === 'sin') res = Math.sin(num);
-      else if (val === 'cos') res = Math.cos(num);
-      else if (val === 'tan') res = Math.tan(num);
-      else if (val === 'sqrt') res = num >= 0 ? Math.sqrt(num) : 0;
-      else if (val === 'log') res = num > 0 ? Math.log10(num) : 0;
-      setCalcDisplay(String(Number(res.toFixed(8))));
-      setCalcResetOnNextInput(true);
-    } else if (val === 'pi') {
-      setCalcDisplay(String(Math.PI));
-      setCalcResetOnNextInput(true);
+  const playFeedbackTone = (type) => {
+    if (!soundEnabled) return;
+    if (type === 'success') {
+      playSynthTone(523.25, 0.08, 'sine', true);
+      setTimeout(() => playSynthTone(659.25, 0.08, 'sine', true), 80);
+      setTimeout(() => playSynthTone(783.99, 0.12, 'sine', true), 160);
+    } else if (type === 'fail') {
+      playSynthTone(196.00, 0.15, 'triangle', true);
+      setTimeout(() => playSynthTone(155.56, 0.25, 'triangle', true), 100);
     } else {
-      if (calcResetOnNextInput) {
-        setCalcDisplay(val);
-        setCalcResetOnNextInput(false);
-      } else {
-        setCalcDisplay(prev => prev === '0' ? val : prev + val);
-      }
+      playSynthTone(400, 0.04, 'sine', true);
     }
   };
 
-  const playTone = (freq, dur) => {
-    try {
-      const ac = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      osc.connect(gain);
-      gain.connect(ac.destination);
-      osc.frequency.setValueAtTime(freq, ac.currentTime);
-      gain.gain.setValueAtTime(0.04, ac.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
-      osc.start();
-      osc.stop(ac.currentTime + dur);
-    } catch (e) {}
+  // Start Math practice
+  const startPractice = (isReviewMode = false) => {
+    playFeedbackTone('tap');
+    setIsFlipped(false);
+    setDeckIndex(0);
+    setQuizTimer(0);
+    setQuizResults(null);
+    setEvaluationFeedback(null);
+    setUserInputsValue('');
+    setReviewMistakesMode(isReviewMode);
+
+    if (isReviewMode) {
+      if (mistakes.length === 0) return;
+      const shuffled = [...mistakes].sort(() => Math.random() - 0.5);
+      setTargetDeck(shuffled);
+    } else {
+      const sizeList = practiceType === 'quiz' ? quizSize : 15;
+      const cards = [];
+      for (let i = 0; i < sizeList; i++) {
+        cards.push(generateCard(operation, difficulty, lowerBound1, upperBound1, lowerBound2, upperBound2));
+      }
+      setTargetDeck(cards);
+    }
+    setScreen('practice');
   };
 
-  const filteredGames = games.filter(g => {
-    const matchesSearch = g.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          g.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === 'All Games' || g.category === categoryFilter;
-    return matchesSearch && matchesCategory;
+  // Submit Speed Quiz input answer
+  const handleAnswerSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (!userInputsValue.trim()) return;
+
+    const currentCard = targetDeck[deckIndex];
+    if (!currentCard) return;
+
+    const parsedInput = parseInt(userInputsValue.trim(), 10);
+    const isCorrect = parsedInput === currentCard.answer;
+
+    if (isCorrect) {
+      setEvaluationFeedback('correct');
+      playFeedbackTone('success');
+      
+      setLifetimeStats((prev) => {
+        const todayStr = new Date().toDateString();
+        let currentStreak = prev.streak;
+        if (prev.lastPlayed === todayStr) {
+          // remains
+        } else if (prev.lastPlayed === new Date(Date.now() - 86400000).toDateString()) {
+          currentStreak += 1;
+        } else {
+          currentStreak = 1;
+        }
+
+        return {
+          totalChecked: prev.totalChecked + 1,
+          totalCorrect: prev.totalCorrect + 1,
+          streak: currentStreak,
+          lastPlayed: todayStr,
+          history: [...prev.history, { date: Date.now(), answerCorrect: true }]
+        };
+      });
+
+      if (reviewMistakesMode) {
+        setMistakes((prev) => prev.filter((m) => !(m.num1 === currentCard.num1 && m.num2 === currentCard.num2 && m.operation === currentCard.operation)));
+      }
+    } else {
+      setEvaluationFeedback('incorrect');
+      playFeedbackTone('fail');
+
+      setLifetimeStats((prev) => ({
+        totalChecked: prev.totalChecked + 1,
+        totalCorrect: prev.totalCorrect,
+        history: [...prev.history, { date: Date.now(), answerCorrect: false }]
+      }));
+
+      const exists = mistakes.some((m) => m.num1 === currentCard.num1 && m.num2 === currentCard.num2 && m.operation === currentCard.operation);
+      if (!exists) {
+        setMistakes((prev) => [...prev, currentCard]);
+      }
+    }
+
+    const updatedLog = [...(quizResults?.list || [])];
+    updatedLog.push({ ...currentCard, userAnswer: parsedInput, answerCorrect: isCorrect });
+
+    setQuizResults((prev) => ({
+      answered: (prev?.answered || 0) + 1,
+      correctCount: (prev?.correctCount || 0) + (isCorrect ? 1 : 0),
+      list: updatedLog
+    }));
+
+    setTimeout(() => {
+      setEvaluationFeedback(null);
+      setUserInputsValue('');
+      if (deckIndex + 1 < targetDeck.length) {
+        setDeckIndex((prev) => prev + 1);
+      } else {
+        // finished
+      }
+    }, 1000);
+  };
+
+  // Direct Self-evaluation feedback for classic card flip state
+  const handleFlashcardEvaluate = (isGotItRight) => {
+    const currentCard = targetDeck[deckIndex];
+    if (!currentCard) return;
+
+    if (isGotItRight) {
+      playFeedbackTone('success');
+      setLifetimeStats((prev) => {
+        const todayStr = new Date().toDateString();
+        let currentStreak = prev.streak;
+        if (prev.lastPlayed === todayStr) {
+          // remain
+        } else if (prev.lastPlayed === new Date(Date.now() - 86400000).toDateString()) {
+          currentStreak += 1;
+        } else {
+          currentStreak = 1;
+        }
+
+        return {
+          totalChecked: prev.totalChecked + 1,
+          totalCorrect: prev.totalCorrect + 1,
+          streak: currentStreak,
+          lastPlayed: todayStr,
+          history: [...prev.history, { date: Date.now(), answerCorrect: true }]
+        };
+      });
+
+      if (reviewMistakesMode) {
+        setMistakes((prev) => prev.filter((m) => !(m.num1 === currentCard.num1 && m.num2 === currentCard.num2 && m.operation === currentCard.operation)));
+      }
+    } else {
+      playFeedbackTone('fail');
+      setLifetimeStats((prev) => ({
+        totalChecked: prev.totalChecked + 1,
+        totalCorrect: prev.totalCorrect,
+        history: [...prev.history, { date: Date.now(), answerCorrect: false }]
+      }));
+
+      const exists = mistakes.some((m) => m.num1 === currentCard.num1 && m.num2 === currentCard.num2 && m.operation === currentCard.operation);
+      if (!exists) {
+        setMistakes((prev) => [...prev, currentCard]);
+      }
+    }
+
+    setIsFlipped(false);
+    setTimeout(() => {
+      if (deckIndex + 1 < targetDeck.length) {
+        setDeckIndex((prev) => prev + 1);
+      } else {
+        setScreen('dashboard');
+      }
+    }, 200);
+  };
+
+  const handleKeypadPress = (val) => {
+    playSynthTone(380, 0.04, 'sine', soundEnabled);
+    if (val === 'back') {
+      setUserInputsValue((prev) => prev.slice(0, -1));
+    } else if (val === 'clear') {
+      setUserInputsValue('');
+    } else if (val === 'minus') {
+      setUserInputsValue((prev) => (prev.startsWith('-') ? prev.slice(1) : '-' + prev));
+    } else {
+      setUserInputsValue((prev) => prev + val);
+    }
+  };
+
+  // Custom Local game items additions loader
+  const handleAddLocalGame = (e) => {
+    e.preventDefault();
+    if (!mgmtGameName.trim() || !mgmtGameUrl.trim()) return;
+
+    let targetUrl = mgmtGameUrl.trim();
+    let customId = null;
+    let customName = null;
+    let customJsname = null;
+    let customSandbox = null;
+
+    if (targetUrl.startsWith('<iframe') || targetUrl.includes('src=')) {
+      // It's a raw iframe snippet! Let's extract everything inside it
+      const srcMatch = targetUrl.match(/src=["']([^"']+)["']/i);
+      if (srcMatch) targetUrl = srcMatch[1];
+      
+      const idMatch = mgmtGameUrl.match(/id=["']([^"']+)["']/i);
+      if (idMatch) customId = idMatch[1];
+      
+      const nameMatch = mgmtGameUrl.match(/name=["']([^"']+)["']/i);
+      if (nameMatch) customName = nameMatch[1];
+      
+      const jsnameMatch = mgmtGameUrl.match(/jsname=["']([^"']+)["']/i);
+      if (jsnameMatch) customJsname = jsnameMatch[1];
+      
+      const sandboxMatch = mgmtGameUrl.match(/sandbox=["']([^"']+)["']/i);
+      if (sandboxMatch) customSandbox = sandboxMatch[1];
+    }
+
+    // Always clean up any HTML entity encodings like &amp; in the URL
+    targetUrl = targetUrl.replace(/&amp;/g, '&');
+
+    const newObj = {
+      id: `local-${Date.now()}`,
+      name: mgmtGameName.trim(),
+      url: targetUrl,
+      category: mgmtGameCat,
+      description: mgmtGameDesc.trim() || 'Custom loaded browser URL link game.',
+      isLocal: true,
+      iframeId: customId,
+      iframeName: customName,
+      jsname: customJsname,
+      sandbox: customSandbox
+    };
+
+    setLocalGames((prev) => [newObj, ...prev]);
+    setMgmtGameName('');
+    setMgmtGameUrl('');
+    setMgmtGameDesc('');
+    setShowGameManager(false);
+    playFeedbackTone('success');
+  };
+
+  const deleteLocalGame = (id) => {
+    if (window.confirm("Delete this custom loaded game from your local browser dashboard?")) {
+      setLocalGames((prev) => prev.filter((g) => g.id !== id));
+      playFeedbackTone('tap');
+    }
+  };
+
+  // Merge loaded index.json games + the user's custom stored list games
+  const allAvailableGames = [...localGames, ...gamesList];
+
+  const filteredGames = allAvailableGames.filter((g) => {
+    const sMatch = g.name.toLowerCase().includes(gameSearch.toLowerCase()) || 
+                   g.description.toLowerCase().includes(gameSearch.toLowerCase());
+    const cMatch = selectedCategory === 'All' || g.category === selectedCategory || (selectedCategory === 'Local' && g.isLocal);
+    return sMatch && cMatch;
   });
 
-  const getEmojiForIcon = (iconName) => {
-    switch (iconName) {
-      case 'Snake': return '🐍';
-      case 'Gamepad2': return '🎮';
-      case 'Box': return '🧱';
-      case 'Bird': return '🐦';
-      case 'Calculator': return '🧮';
-      default: return '🎮';
+  const uniqueCategories = ['All', 'Arcade', 'Puzzle', 'Action', 'Sports', 'Retro', 'Local'];
+
+  // Launch in isolated absolute blank popup
+  const openInAboutBlank = (game) => {
+    try {
+      const url = game.url;
+      const win = window.open('about:blank', '_blank');
+      if (!win) {
+        alert("Pop-up blocker prevented opening in about:blank mode. Please whitelist or allow popups on this tab.");
+        return;
+      }
+      win.document.body.style.margin = '0';
+      win.document.body.style.height = '100vh';
+      win.document.body.style.overflow = 'hidden';
+      const iframe = win.document.createElement('iframe');
+      iframe.style.border = 'none';
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.margin = '0';
+      iframe.src = url;
+      win.document.body.appendChild(iframe);
+    } catch (e) {
+      console.error(e);
     }
   };
 
+  const solvedCount = lifetimeStats.totalChecked || 0;
+  const accuracyPct = solvedCount > 0 ? Math.round((lifetimeStats.totalCorrect / solvedCount) * 100) : 0;
+  const streakCount = lifetimeStats.streak || 0;
+
   return (
-    <div id="app-root" className="min-h-screen bg-[#070b13] text-[#f1f5f9] font-sans antialiased overflow-x-hidden flex flex-col selection:bg-purple-600 selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col relative">
       
-      {/* CLOAK LAYER */}
-      {isCloaked && (
-        <div id="cloak-overlay" className="fixed inset-0 z-[99999] bg-[#f8f9fa] text-[#202124] flex flex-col overflow-hidden animate-fade-in select-text">
+      {/* STEALTH FLOATING CORNER BACK LINK */}
+      <div className="absolute top-1 left-4 opacity-5 pointer-events-auto hover:opacity-100 transition-opacity z-50">
+        <button 
+          onClick={() => setScreen(screen === 'stealth-console' ? 'dashboard' : 'stealth-console')} 
+          className="text-[9px] font-mono text-slate-400 font-bold tracking-widest cursor-pointer px-1 py-0.5 rounded"
+          title="Stealth Backdoor (` key)"
+        >
+          ~ SECRETS
+        </button>
+      </div>
+
+      {/* STANDARD NAVIGATION HEADER */}
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-100 py-3 px-6 shadow-xs select-none">
+        <div className="mx-auto max-w-5xl flex items-center justify-between">
           
-          {/* TOP DOCS HEADER */}
-          {selectedCloak.id === 'gdocs' && (
-            <div id="gdocs-shell" className="w-full flex flex-col h-full">
-              <div className="bg-[#f8f9fa] border-b border-[#dadce0] px-3 py-1 flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-blue-600 text-2xl font-semibold"><FileText className="w-8 h-8 inline text-[#2684fc]" /></span>
-                    <div className="flex flex-col">
-                      <div className="flex items-center space-x-2">
-                        <input 
-                          type="text" 
-                          value={selectedCloak.title.split(' - ')[0]} 
-                          className="font-medium text-[16px] text-[#202124] bg-transparent border-0 outline-none w-52 focus:bg-white focus:border px-1 rounded"
-                          onChange={() => {}}
-                        />
-                        <span className="text-[#5f6368] text-xs">Starred</span>
-                      </div>
-                      <div className="flex space-x-3 text-xs text-[#5f6368] font-medium py-0.5">
-                        <span className="cursor-pointer hover:bg-gray-200 px-1 rounded py-0.5">File</span>
-                        <span className="cursor-pointer hover:bg-gray-200 px-1 rounded py-0.5">Edit</span>
-                        <span className="cursor-pointer hover:bg-gray-200 px-1 rounded py-0.5">View</span>
-                        <span className="cursor-pointer hover:bg-gray-200 px-1 rounded py-0.5">Insert</span>
-                        <span className="cursor-pointer hover:bg-gray-200 px-1 rounded py-0.5">Format</span>
-                        <span className="cursor-pointer hover:bg-gray-200 px-1 rounded py-0.5">Tools</span>
-                        <span className="cursor-pointer hover:bg-gray-200 px-1 rounded py-0.5">Extensions</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-3">
-                    <span className="text-[11px] text-[#64748b] bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-full font-mono animate-pulse">
-                      SCHOOL DEFENSE ENFORCED • PRESS ESC TO PLAY
-                    </span>
-                    <button 
-                      onClick={() => setIsCloaked(false)}
-                      className="bg-[#c2e7ff] text-[#001d35] hover:bg-[#b0dbf7] font-semibold text-xs px-4 py-2 rounded-full cursor-pointer transition-colors"
-                    >
-                      Return to Games
-                    </button>
-                  </div>
-                </div>
-              </div>
-              
-              {/* EDITOR SECTION */}
-              <div className="flex-1 bg-[#f0f3f6] p-4 flex justify-center overflow-y-auto">
-                <div className="w-[812px] min-h-[1056px] bg-white border border-[#dadce0] shadow-sm p-16 flex flex-col">
-                  <textarea 
-                    value={schoolNotes}
-                    onChange={(e) => handleNotesChange(e.target.value)}
-                    className="w-full h-full text-base font-serif leading-relaxed text-[#202124] border-0 outline-none resize-none align-baseline bg-transparent"
-                  />
-                </div>
-              </div>
+          <div 
+            className="flex items-center space-x-3 cursor-pointer group"
+            onClick={() => { setScreen('dashboard'); playFeedbackTone('tap'); }}
+          >
+            <div className="bg-blue-600 text-white w-9 h-9 rounded-xl flex items-center justify-center font-display font-extrabold text-md shadow-sm shadow-blue-200">
+              ±
             </div>
-          )}
-
-          {/* CLASSROOM TEMPLATE */}
-          {selectedCloak.id === 'classroom' && (
-            <div id="classroom-shell" className="w-full h-full bg-[#f8f9fa] flex flex-col">
-              <div className="bg-white border-b border-[#dadce0] h-14 flex items-center justify-between px-6 shadow-sm">
-                <div className="flex items-center space-x-3">
-                  <span className="text-[#137333] font-bold text-lg">🏫 Google Classroom</span>
-                  <div className="h-6 w-[1px] bg-gray-300"></div>
-                  <nav className="flex space-x-4 text-xs font-medium text-gray-600">
-                    <span className="text-[#137333] border-b-2 border-[#137333] px-2 py-4 cursor-pointer">Stream</span>
-                    <span className="hover:text-[#137333] px-2 py-4 cursor-pointer">Classwork</span>
-                    <span className="hover:text-[#137333] px-2 py-4 cursor-pointer">People</span>
-                    <span className="hover:text-[#137333] px-2 py-4 cursor-pointer">Grades</span>
-                  </nav>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <span className="text-xs bg-green-50 text-green-700 font-mono px-3 py-1 border border-green-200 rounded">
-                    Cloaked Safe Mode Active
-                  </span>
-                  <button 
-                    onClick={() => setIsCloaked(false)}
-                    className="bg-[#137333] text-white font-medium text-xs px-4 py-1.5 rounded-md hover:bg-[#0f602b] transition-colors"
-                  >
-                    Quick Resume (ESC)
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex-1 max-w-4xl w-full mx-auto p-6 overflow-y-auto">
-                <div className="bg-[#1967d2] text-white p-8 rounded-lg mb-6 shadow-sm relative overflow-hidden">
-                  <h1 className="text-3xl font-bold font-sans">AP Calculus BC</h1>
-                  <p className="text-sm text-blue-100 mt-1">Section 4 — Fall Term 2026</p>
-                  <div className="absolute right-4 bottom-4 text-3xl opacity-30">📐🧪</div>
-                </div>
-
-                <div className="grid grid-cols-4 gap-6">
-                  <div className="col-span-1 bg-white border border-gray-200 rounded-lg p-4 h-fit">
-                    <h3 className="text-xs font-bold text-gray-500 uppercase">Upcoming Events</h3>
-                    <p className="text-xs text-gray-700 mt-2">Woohoo, no work due soon!</p>
-                    <span className="text-xs text-blue-600 cursor-pointer hover:underline mt-4 block">View All</span>
-                  </div>
-
-                  <div className="col-span-3 space-y-4">
-                    <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center space-x-3 cursor-text hover:border-blue-300">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold">T</div>
-                      <input 
-                        type="text" 
-                        placeholder="Announce something to your class..." 
-                        className="text-xs text-gray-500 border-none outline-none w-full bg-transparent"
-                        readOnly
-                      />
-                    </div>
-
-                    <div className="bg-white border border-gray-200 rounded-lg p-5">
-                      <div className="flex items-center space-x-3 mb-3">
-                        <div className="w-9 h-9 rounded-full bg-[#137333] flex items-center justify-center text-white text-xs font-bold">M</div>
-                        <div>
-                          <div className="text-xs font-bold text-gray-800">Mr. Matthew Fletcher</div>
-                          <div className="text-[10px] text-gray-500">Posted at 8:12 AM</div>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-700 leading-relaxed">
-                        Good morning class. Please review chapter 7.4 of the Advanced Calculus worksheets. We will have a rapid mental training challenge on arithmetic operations today. Make sure to complete the exercises on equations below:
-                      </p>
-                      <div className="border border-gray-200 p-3 rounded-md mt-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer" onClick={() => setIsCloaked(false)}>
-                        <div className="flex items-center space-x-3">
-                          <span className="text-3xl">📝</span>
-                          <div>
-                            <div className="text-xs font-bold text-gray-800">Homework_Integration_By_Parts.pdf</div>
-                            <div className="text-[10px] text-gray-400">PDF Document • 4.2 MB</div>
-                          </div>
-                        </div>
-                        <span className="text-xs text-blue-600 font-semibold">Load Worksheet</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* CANVAS TEMPLATE */}
-          {selectedCloak.id === 'canvas' && (
-            <div id="canvas-shell" className="w-full h-full bg-[#f5f5f5] flex">
-              <div className="w-20 bg-[#30353c] h-full flex flex-col items-center justify-between py-6 text-white space-y-4">
-                <div className="flex flex-col items-center space-y-6 w-full">
-                  <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center font-bold text-lg select-none cursor-pointer">C</div>
-                  <div className="text-[11px] text-red-500 font-bold flex flex-col items-center cursor-pointer">
-                    <span className="text-lg">👤</span>
-                    Account
-                  </div>
-                  <div className="text-[11px] text-red-500 font-bold flex flex-col items-center cursor-pointer">
-                    <span className="text-lg">📊</span>
-                    Dashboard
-                  </div>
-                  <div className="text-[11px] text-gray-400 flex flex-col items-center cursor-pointer hover:text-white">
-                    <span className="text-lg">📚</span>
-                    Courses
-                  </div>
-                  <div className="text-[11px] text-gray-400 flex flex-col items-center cursor-pointer hover:text-white">
-                    <span className="text-lg">📅</span>
-                    Calendar
-                  </div>
-                  <div className="text-[11px] text-gray-400 flex flex-col items-center cursor-pointer hover:text-white">
-                    <span className="text-lg">📥</span>
-                    Inbox
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setIsCloaked(false)} 
-                  className="bg-red-600 hover:bg-red-700 text-xs font-semibold py-1 px-3.5 rounded mt-4"
-                >
-                  Uncloak
-                </button>
-              </div>
-
-              <div className="flex-1 p-8 overflow-y-auto">
-                <div className="border-b border-gray-200 pb-3 flex justify-between items-center mb-6">
-                  <h1 className="text-2xl font-normal text-gray-800">Canvas Dashboard</h1>
-                  <span className="text-xs font-mono text-gray-500 bg-gray-200 px-3 py-1 rounded">
-                    Parent Evasion Loaded • ESC to Toggle
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-                    <div className="h-28 bg-[#009688]"></div>
-                    <div className="p-4">
-                      <h3 className="text-sm font-bold text-blue-600 hover:underline">AP Biology - 3rd Period</h3>
-                      <p className="text-xs text-gray-500 mt-1">2026 Fall Semester</p>
-                      <p className="text-xs text-orange-600 mt-4">⚠️ Quiz 5: Mendelian Genetics due tonight</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-                    <div className="h-28 bg-[#3f51b5]"></div>
-                    <div className="p-4">
-                      <h3 className="text-sm font-bold text-blue-600 hover:underline">Pre-Calculus (A)</h3>
-                      <p className="text-xs text-gray-500 mt-1">2026 Fall Semester</p>
-                      <p className="text-xs text-gray-600 mt-4">✓ All assignments complete</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-                    <div className="h-28 bg-[#e91e63]"></div>
-                    <div className="p-4">
-                      <h3 className="text-sm font-bold text-blue-600 hover:underline">English Literature II</h3>
-                      <p className="text-xs text-gray-500 mt-1">2026 Fall Academic Session</p>
-                      <p className="text-xs text-gray-600 mt-4">✓ No active assignments</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-8 bg-white border border-gray-200 rounded-lg p-5">
-                  <h3 className="text-sm font-bold text-gray-800 mb-4">Enrolled Academic Performance</h3>
-                  <div className="text-xs divide-y divide-gray-100">
-                    <div className="flex justify-between py-2 text-gray-700">
-                      <span>AP Biology</span>
-                      <span className="font-bold text-green-700">96.5% (A)</span>
-                    </div>
-                    <div className="flex justify-between py-2 text-gray-700">
-                      <span>Pre-Calculus (A)</span>
-                      <span className="font-bold text-green-700">98.2% (A)</span>
-                    </div>
-                    <div className="flex justify-between py-2 text-gray-700">
-                      <span>English Literature II</span>
-                      <span className="font-bold text-green-700">94.0% (A)</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* SCIENTIFIC CALCULATOR CLOAK */}
-          {selectedCloak.id === 'calculator' && (
-            <div id="calculator-shell" className="w-[440px] m-auto bg-[#1e293b] border-4 border-[#334155] rounded-xl shadow-2xl overflow-hidden p-6 text-white flex flex-col space-y-4">
-              <div className="flex justify-between items-center bg-[#0f172a] p-3 rounded-lg border border-[#334155]">
-                <div className="text-left font-mono">
-                  <div className="text-[10px] text-gray-500 h-4 uppercase">{calcMemory ? `${calcMemory} ${calcOperation}` : ''}</div>
-                  <div className="text-2xl font-bold tracking-tight text-white">{calcDisplay}</div>
-                </div>
-                <div className="text-right">
-                  <span className="text-[9px] bg-sky-950 text-sky-400 border border-sky-800 px-2.5 py-1 rounded font-bold uppercase animate-pulse">
-                    Maths Cover Mode
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-5 gap-2">
-                {['sin', 'cos', 'tan', 'sqrt', 'log'].map(op => (
-                  <button 
-                    key={op} 
-                    onClick={() => handleCalcBtn(op)}
-                    className="bg-[#334155] text-xs font-bold font-mono py-2.5 rounded hover:bg-[#475569] active:scale-95 transition-all text-sky-400"
-                  >
-                    {op}
-                  </button>
-                ))}
-                {['^', 'pi', 'C', '(', ')'].map(op => (
-                  <button 
-                    key={op} 
-                    onClick={() => handleCalcBtn(op)} 
-                    className="bg-[#334155] text-slate-300 py-2.5 text-xs font-bold font-mono rounded hover:bg-[#475569] active:scale-95 transition-all"
-                  >
-                    {op}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                {['7', '8', '9', '/'].map(op => (
-                  <button 
-                    key={op} 
-                    onClick={() => handleCalcBtn(op)} 
-                    className={`py-3 rounded font-mono font-bold hover:opacity-90 active:scale-95 transition-all ${op === '/' ? 'bg-indigo-600 text-white' : 'bg-slate-700'}`}
-                  >
-                    {op}
-                  </button>
-                ))}
-                {['4', '5', '6', '*'].map(op => (
-                  <button 
-                    key={op} 
-                    onClick={() => handleCalcBtn(op)} 
-                    className={`py-3 rounded font-mono font-bold hover:opacity-90 active:scale-95 transition-all ${op === '*' ? 'bg-indigo-600 text-white' : 'bg-slate-700'}`}
-                  >
-                    {op}
-                  </button>
-                ))}
-                {['1', '2', '3', '-'].map(op => (
-                  <button 
-                    key={op} 
-                    onClick={() => handleCalcBtn(op)} 
-                    className={`py-3 rounded font-mono font-bold hover:opacity-90 active:scale-95 transition-all ${op === '-' ? 'bg-indigo-600 text-white' : 'bg-slate-700'}`}
-                  >
-                    {op}
-                  </button>
-                ))}
-                {['0', '.', '=', '+'].map(op => (
-                  <button 
-                    key={op} 
-                    onClick={() => handleCalcBtn(op)} 
-                    className={`py-3 rounded font-mono font-bold hover:opacity-90 active:scale-95 transition-all ${op === '=' ? 'bg-[#10b981] text-sky-950' : op === '+' ? 'bg-indigo-600 text-white' : 'bg-slate-700'}`}
-                  >
-                    {op}
-                  </button>
-                ))}
-              </div>
-
-              <div className="pt-2 text-center">
-                <p className="text-[10px] text-gray-500">Fully functional scientific computations.</p>
-                <button 
-                  onClick={() => setIsCloaked(false)} 
-                  className="mt-3 bg-[#e2e8f0] text-[#0f172a] text-xs font-semibold py-1.5 px-6 rounded-lg hover:bg-white transition-colors"
-                >
-                  Return to Active Tab
-                </button>
-              </div>
-            </div>
-          )}
-
-        </div>
-      )}
-
-      {/* HEADER SECTION */}
-      <header id="classic-header" className="sticky top-0 z-40 bg-[#090e1a]/95 backdrop-blur-md border-b border-slate-900/60 shadow-xl py-3.5 px-6">
-        <div className="mx-auto max-w-7xl flex flex-col md:flex-row items-center justify-between gap-4">
-          
-          {/* Logo */}
-          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setSelectedGameId(null); setSelectedGameData(null); }}>
-            <span className="text-3xl">🎮</span>
             <div>
-              <h1 className="text-xl font-bold tracking-wider bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent uppercase">
-                Unblocked Hub
+              <h1 className="text-sm font-bold tracking-tight bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent font-display">
+                Math Flashcards
               </h1>
-              <p className="text-[10px] tracking-widest text-[#64748b] font-mono">
-                SECURE SANDBOXED ENVIRONMENT
+              <p className="text-[9px] tracking-wider text-slate-400 font-medium uppercase font-mono">
+                Interactive cover dashboard
               </p>
             </div>
           </div>
 
-          {/* Quick Filters / Controls */}
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            
-            {/* School Cover Dropdown */}
-            <div className="relative">
-              <button 
-                onClick={() => setShowCloakMenu(!showCloakMenu)}
-                className="bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-[#a0aec0] px-3.5 py-2 rounded-lg flex items-center space-x-1.5 cursor-pointer transition-all active:scale-95 focus:outline-none"
-              >
-                <span>{selectedCloak.iconSrc}</span>
-                <span>Cloak: <b>{selectedCloak.name}</b></span>
-              </button>
-              
-              {showCloakMenu && (
-                <div className="absolute right-0 mt-2.5 w-56 bg-[#0f172a] border border-slate-800 rounded-xl shadow-2xl py-1.5 z-50 text-left">
-                  <div className="px-3 py-1 border-b border-slate-800 mb-1">
-                    <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Tab Hider Presets</span>
-                  </div>
-                  {CLOAK_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      onClick={() => {
-                        setSelectedCloak(preset);
-                        setShowCloakMenu(false);
-                      }}
-                      className={`w-full flex items-center space-x-2.5 px-3 py-2 text-xs hover:bg-slate-900 transition-colors text-left ${selectedCloak.id === preset.id ? 'text-cyan-400 bg-slate-900/50' : 'text-slate-300'}`}
-                    >
-                      <span className="text-md">{preset.iconSrc}</span>
-                      <span className="font-medium">{preset.name}</span>
-                    </button>
-                  ))}
-                  <div className="px-3 pt-1 border-t border-slate-800 mt-1.5">
-                    <p className="text-[9px] text-slate-500 leading-tight">Selecting a cloak modifies the browser tab title and favicon, rendering interactive simulations if cloaked.</p>
-                  </div>
-                </div>
+          <div className="flex items-center space-x-3">
+            {/* Audio switch toggle */}
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="p-2 rounded-xl border border-slate-100 text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer"
+              title={soundEnabled ? "Mute sounds" : "Enable sound fx"}
+            >
+              {soundEnabled ? (
+                <Volume2 className="w-3.5 h-3.5 text-slate-600" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5 text-slate-300" />
               )}
-            </div>
-
-            {/* Panic Button */}
-            <button 
-              onClick={() => {
-                setIsCloaked(true);
-                playTone(200, 0.1);
-              }}
-              title="Instantly swap the tab into a safe study sheet or doc! Or hit ESC key anytime."
-              className="bg-red-950/40 hover:bg-red-900/50 border border-red-800/80 text-red-400 font-semibold px-4 py-2 rounded-xl text-xs flex items-center space-x-1.5 hover:shadow-lg hover:shadow-red-950/10 cursor-pointer transition-all active:scale-95"
-            >
-              <EyeOff className="w-3.5 h-3.5 text-red-400" />
-              <span>Panic Button (ESC)</span>
             </button>
 
-            {/* Add Custom Game Button */}
-            <button 
-              onClick={() => {
-                setShowAddModal(true);
-                playTone(400, 0.05);
-              }}
-              className="bg-purple-950/20 hover:bg-purple-900/30 border border-purple-800 text-purple-300 font-semibold px-4 py-2 rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer hover:shadow-md hover:shadow-purple-950/10 active:scale-95"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Import Custom Game</span>
-            </button>
-
+            {/* Back button to dashboard when active */}
+            {screen !== 'dashboard' && (
+              <button
+                onClick={() => { setScreen('dashboard'); setSelectedGame(null); playFeedbackTone('tap'); }}
+                className="text-xs font-bold px-3 py-1.5 border border-slate-250 bg-white hover:bg-slate-50 rounded-xl cursor-pointer transition-colors shadow-2xs"
+              >
+                ← Return to Cover
+              </button>
+            )}
           </div>
 
         </div>
       </header>
 
-      {/* ACTION BLOCK / MAIN BODY GRID */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-6 flex flex-col items-stretch">
+      {/* CONTENT SCREEN SELECTOR */}
+      <main className="flex-1 max-w-5xl mx-auto w-full px-5 py-6 flex flex-col justify-start">
         
-        {selectedGameId && selectedGameData ? (
-          
-          /* ACTIVE GAME PLAYER SCREEN VIEW */
-          <div id="active-game-viewport" className="flex flex-col h-full space-y-4 animate-fade-in flex-1">
+        {screen === 'dashboard' ? (
+          /* ==================================================================== */
+          /* COVER DASHBOARD (Standard Math Flashcard Setup)                     */
+          /* ==================================================================== */
+          <div className="space-y-6 animate-fade-in relative z-10">
             
-            {/* Control Strip & Info bar */}
-            <div className="bg-[#0f172a] rounded-2xl border border-slate-900 px-5 py-3 flex flex-wrap items-center justify-between gap-4 shadow-xl">
-              
-              {/* Back to library & Title */}
-              <div className="flex items-center space-x-3">
-                <button 
-                  onClick={() => {
-                    setSelectedGameId(null);
-                    setSelectedGameData(null);
-                    playTone(250, 0.05);
-                  }}
-                  className="bg-slate-900 hover:bg-slate-800 hover:text-white border border-slate-800 rounded-xl px-3.5 py-2 text-slate-300 text-xs font-semibold cursor-pointer transition-colors"
-                >
-                  ← Back to Library
-                </button>
-                <div className="h-6 w-[1px] bg-slate-800 hidden sm:block"></div>
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xl">{getEmojiForIcon(selectedGameData.icon)}</span>
-                    <h2 className="font-bold text-md text-white tracking-wide">{selectedGameData.title}</h2>
-                    <span className="text-[9px] font-mono text-purple-400 font-bold bg-purple-950/60 border border-purple-900 px-2 py-0.5 rounded uppercase">
-                      {selectedGameData.category}
-                    </span>
-                  </div>
-                </div>
+            {/* COVER METRICS HERO */}
+            <div className="relative rounded-3xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-6 overflow-hidden shadow-lg shadow-blue-100 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="space-y-2 z-10 max-w-lg text-center md:text-left">
+                <span className="text-[10px] font-bold tracking-widest text-[#93c5fd] bg-blue-900/40 border border-blue-500/20 px-3 py-1 rounded-full font-mono uppercase">
+                  ⚡ Grade Arithmetic Training
+                </span>
+                <h2 className="text-lg md:text-xl font-bold tracking-tight font-display leading-tight">
+                  Sharpen Your Mental Arithmetics
+                </h2>
+                <p className="text-xs text-blue-100 font-display">
+                  Practice simple equations across customized difficulty presets, keep track of errors, and boost processing speeds daily.
+                </p>
               </div>
 
-              {/* Utility togglers */}
-              <div className="flex flex-wrap items-center gap-3">
+              {/* Cover Stats Row */}
+              <div className="flex items-center gap-6 bg-white/10 backdrop-blur-md p-3.5 rounded-2xl border border-white/10 z-10 w-full md:w-auto justify-around">
+                <div className="text-center px-1">
+                  <div className="text-xl font-extrabold font-display leading-none text-white">{solvedCount}</div>
+                  <div className="text-[9px] font-bold text-blue-200 mt-1 uppercase tracking-wider font-display">Solved</div>
+                </div>
+                <div className="w-[1px] h-6 bg-white/20"></div>
+
+                <div className="text-center px-1">
+                  <div className="text-xl font-extrabold font-display leading-none text-emerald-300">{accuracyPct}%</div>
+                  <div className="text-[9px] font-bold text-blue-200 mt-1 uppercase tracking-wider font-display">Accuracy</div>
+                </div>
+                <div className="w-[1px] h-6 bg-white/20"></div>
+
+                <div className="text-center px-1">
+                  <div className="text-xl font-extrabold font-display leading-none text-amber-300">🔥 {streakCount}</div>
+                  <div className="text-[9px] font-bold text-blue-200 mt-1 uppercase tracking-wider font-display">Streak</div>
+                </div>
+              </div>
+            </div>
+
+            {/* SELECTION CONFIGS */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+              
+              {/* PRIMARY MATH CONFIG */}
+              <div className="md:col-span-7 bg-white rounded-3xl border border-slate-150/80 p-6 shadow-2xs space-y-5">
+                <div className="border-b border-slate-100 pb-3">
+                  <h3 className="text-xs font-extrabold text-slate-800 font-display uppercase tracking-wider">
+                    Flashcard Deck Configuration
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Set up custom operations and difficulties</p>
+                </div>
+
+                {/* format */}
+                <div className="space-y-1.5Col">
+                  <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-display">
+                    Display Platform Format
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setPracticeType('flashcard')}
+                      className={`p-3 rounded-2xl border text-left cursor-pointer transition-all ${
+                        practiceType === 'flashcard' 
+                          ? 'border-blue-600 bg-blue-50/20 text-blue-900 shadow-2xs' 
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-md block">🎴</span>
+                      <span className="text-xs font-bold block leading-none font-display text-slate-800 mt-1">Interactive Card Deck</span>
+                      <span className="text-[9.5px] text-slate-400 mt-1 block">Click to reveal formula answers & check logic</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPracticeType('quiz')}
+                      className={`p-3 rounded-2xl border text-left cursor-pointer transition-all ${
+                        practiceType === 'quiz' 
+                          ? 'border-blue-600 bg-blue-50/20 text-blue-900 shadow-2xs' 
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-md block">⚡</span>
+                      <span className="text-xs font-bold block leading-none font-display text-slate-800 mt-1">Input Speed Quiz</span>
+                      <span className="text-[9.5px] text-slate-400 mt-1 block">Type answers via interactive keypads & tracking timers</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* operation */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-display">
+                    Operators
+                  </label>
+                  <div className="grid grid-cols-5 gap-1.5 font-display">
+                    {[
+                      { id: 'add', symbol: '+' },
+                      { id: 'sub', symbol: '−' },
+                      { id: 'mul', symbol: '×' },
+                      { id: 'div', symbol: '÷' },
+                      { id: 'mixed', symbol: '±' }
+                    ].map((op) => (
+                      <button
+                        key={op.id}
+                        type="button"
+                        onClick={() => setOperation(op.id)}
+                        className={`py-2 rounded-xl border text-center font-extrabold transition-all cursor-pointer ${
+                          operation === op.id ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-250 bg-white text-slate-700 hover:border-slate-350'
+                        }`}
+                      >
+                        <div className="text-md leading-none">{op.symbol}</div>
+                        <div className="text-[8px] font-bold uppercase opacity-80 mt-0.5">{op.id}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* difficulty */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-display">
+                    Difficulty Bounds
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { id: 'easy', text: 'Easy (1-12)' },
+                      { id: 'medium', text: 'Med (2-60)' },
+                      { id: 'hard', text: 'Hard (10-200)' },
+                      { id: 'custom', text: '✏️ Custom' }
+                    ].map((diff) => (
+                      <button
+                        key={diff.id}
+                        type="button"
+                        onClick={() => setDifficulty(diff.id)}
+                        className={`py-2 rounded-xl border text-center text-xs font-bold cursor-pointer transition-all ${
+                          difficulty === diff.id ? 'border-blue-600 bg-blue-50/30 text-blue-900' : 'border-slate-200 bg-white text-slate-500'
+                        }`}
+                      >
+                        {diff.text}
+                      </button>
+                    ))}
+                  </div>
+
+                  {difficulty === 'custom' && (
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl grid grid-cols-2 gap-3 text-xs animate-fade-in font-display">
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">First Term Bounds</span>
+                        <div className="flex items-center gap-1">
+                          <input 
+                            type="number" 
+                            value={lowerBound1} 
+                            onChange={(e) => setLowerBound1(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                            className="w-full bg-white border border-slate-200 py-1.5 px-2 rounded-lg font-mono text-center"
+                          />
+                          <span className="text-slate-400">to</span>
+                          <input 
+                            type="number" 
+                            value={upperBound1} 
+                            onChange={(e) => setUpperBound1(Math.max(lowerBound1, parseInt(e.target.value, 10) || lowerBound1))}
+                            className="w-full bg-white border border-slate-200 py-1.5 px-2 rounded-lg font-mono text-center"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Second Term Bounds</span>
+                        <div className="flex items-center gap-1">
+                          <input 
+                            type="number" 
+                            value={lowerBound2} 
+                            onChange={(e) => setLowerBound2(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                            className="w-full bg-white border border-slate-200 py-1.5 px-2 rounded-lg font-mono text-center"
+                          />
+                          <span className="text-slate-400">to</span>
+                          <input 
+                            type="number" 
+                            value={upperBound2} 
+                            onChange={(e) => setUpperBound2(Math.max(lowerBound2, parseInt(e.target.value, 10) || lowerBound2))}
+                            className="w-full bg-white border border-slate-200 py-1.5 px-2 rounded-lg font-mono text-center"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {practiceType === 'quiz' && (
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-display block">Quiz Size</span>
+                    <div className="flex gap-2">
+                      {[10, 20, 50].map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => setQuizSize(s)}
+                          className={`flex-1 py-1.5 text-xs font-bold border rounded-xl cursor-pointer transition-all ${
+                            quizSize === s ? 'border-blue-600 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {s} Equations
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => startPractice(false)}
+                  className="w-full py-4 mt-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold font-display rounded-2xl shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-98"
+                >
+                  Generate Training Deck <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* CONSOLE STATS & HIDDEN TRIGGER PANEL */}
+              <div className="md:col-span-5 space-y-6">
                 
-                {/* Clone Filter evasion switcher */}
-                <div className="flex items-center space-x-2 p-1.5 bg-slate-950 rounded-lg border border-slate-900 text-xs">
-                  <span className="text-[#64748b] pl-1 font-mono">Cloaked URLs Mode:</span>
-                  <button 
-                    onClick={() => {
-                      setForceBlankMathMode(!forceBlankMathMode);
-                      setIframeKey(k => k + 1);
-                      playTone(400, 0.05);
-                    }}
-                    title="Forces the iframe URL to load under clean school metadata tags to avoid inspection filters."
-                    className={`px-3 py-1 rounded font-semibold text-[10px] uppercase font-mono transition-colors ${forceBlankMathMode ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30' : 'bg-slate-800 text-slate-400'}`}
+                {/* Mistakes Review */}
+                <div className="bg-white rounded-3xl border border-slate-150/80 p-5 shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                    <span className="text-xs font-extrabold text-slate-800 font-display uppercase tracking-wide flex items-center gap-1">
+                      <BookOpen className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
+                      Mistakes Revision Book
+                    </span>
+                    <span className="text-[10px] font-bold font-mono text-orange-600 bg-orange-50 border border-orange-100 px-2 py-0.5 rounded-full">
+                      {mistakes.length} Saved
+                    </span>
+                  </div>
+                  <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                    Formulas missed during practice modes save here automatically so you can focus specifically on difficult sets.
+                  </p>
+                  <button
+                    disabled={mistakes.length === 0}
+                    onClick={() => startPractice(true)}
+                    className="w-full border cursor-pointer border-orange-200 font-bold text-orange-700 bg-orange-50 hover:bg-orange-100 text-xs py-2.5 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    {forceBlankMathMode ? 'about:blank#math' : 'standard'}
+                    Load revision cards
                   </button>
                 </div>
 
-                {/* Reload frame */}
-                <button 
-                  onClick={() => {
-                    setIframeKey(k => k + 1);
-                    playTone(300, 0.05);
-                  }}
-                  title="Reload current game session"
-                  className="bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 cursor-pointer hover:text-white transition-all text-xs flex items-center space-x-1"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Reset Game</span>
-                </button>
+                {/* HIDDEN INCONSPICUOUS STEALTH SHORTCUT ENTRANCE (Perfect "Masked" concept) */}
+                <div className="bg-slate-100/40 border border-dashed border-slate-200 p-5 rounded-3xl space-y-3 relative overflow-hidden select-none">
+                  <div className="absolute top-0 right-0 p-2 opacity-5">
+                    <Gamepad2 className="w-12 h-12" />
+                  </div>
+                  
+                  <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest block font-mono">
+                    System Information
+                  </span>
+                  
+                  <p className="text-[10.5px] text-slate-500 leading-relaxed font-display">
+                    Standard educational formulas generated fully on-client in sandbox layout. 
+                  </p>
 
-                {/* Fullscreen toggle */}
-                <button 
-                  onClick={() => {
-                    setIsFullscreen(!isFullscreen);
-                    playTone(450, 0.05);
-                  }}
-                  title="Expand to Fullscreen View"
-                  className="bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 cursor-pointer hover:text-white transition-all text-xs flex items-center space-x-1"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{isFullscreen ? 'Exit Portal' : 'Theatre Portal'}</span>
-                </button>
+                  <div className="pt-1.5 flex flex-col gap-2">
+                    {/* Stealth Trigger button */}
+                    <button
+                      onClick={() => { setScreen('stealth-console'); playFeedbackTone('tap'); }}
+                      className="w-full py-2 bg-white hover:bg-slate-100 border border-slate-250 rounded-xl text-slate-600 font-bold font-display text-xs cursor-pointer flex items-center justify-center gap-1.5 shadow-3xs"
+                    >
+                      <Gamepad2 className="w-3.5 h-3.5 text-blue-500" />
+                      Open Games Vault
+                    </button>
+                    
+                    <span className="text-[9.5px] text-center text-slate-400 italic block font-mono font-bold">
+                      Shortcut: Save and toggle instantly anytime by pressing the ` (backtick) key!
+                    </span>
+                  </div>
+                </div>
 
               </div>
 
             </div>
 
-            {/* Frame Body Sandbox */}
-            <div className={`grid grid-cols-1 ${isFullscreen ? '' : 'lg:grid-cols-4'} gap-6 flex-1 h-[60vh] min-h-[480px]`}>
+          </div>
+        ) : screen === 'practice' ? (
+          /* ==================================================================== */
+          /* MATHEMATICS PRACTICE AREA (Cover Face)                              */
+          /* ==================================================================== */
+          <div className="max-w-2xl mx-auto w-full space-y-6 animate-fade-in relative z-10 select-none">
+            
+            <div className="bg-white border border-slate-150/85 p-6 rounded-3xl shadow-sm space-y-5 flex flex-col min-h-[460px]">
               
-              {/* IFRAME FRAME VIEWPORT CONTAINER */}
-              <div className={`${isFullscreen ? 'lg:col-span-4' : 'lg:col-span-3'} bg-[#020617] rounded-3xl border border-slate-900 p-2 overflow-hidden flex flex-col shadow-2xl relative transition-all`}>
-                
-                {isLoading ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#020617] text-slate-500 z-10 font-mono">
-                    <span className="text-3xl animate-spin py-2">🎮</span>
-                    <span>Compiling game specifications...</span>
-                  </div>
-                ) : null}
+              {/* Stat strip bar */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3 font-display">
+                <span className="bg-slate-100 border border-slate-200 text-slate-700 font-mono font-bold text-[10.5px] px-2.5 py-1 rounded-lg">
+                  Equation {deckIndex + 1} of {targetDeck.length}
+                </span>
 
-                {/* Cloak/Sandbox Address display */}
-                <div className="px-4 py-1.5 bg-[#090d16] border-b border-slate-900 rounded-t-2xl flex items-center justify-between text-left">
-                  <div className="flex items-center space-x-2 text-[11px] font-mono text-slate-500">
-                    <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></span>
-                    <span>Address Frame:</span>
-                    <span className="text-cyan-400 font-semibold underline">
-                      {forceBlankMathMode ? 'about:blank#math' : 'standard-sandbox-content'}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-600 font-mono cursor-help" title="Standard schools block index domains. We utilize about:blank#math inside nested iframes which overrides search histories.">
-                    🛡️ why is this unblocked?
+                {practiceType === 'quiz' && (
+                  <span className="text-slate-500 font-mono font-bold text-xs">
+                    ⏱️ {Math.floor(quizTimer / 60)}m {quizTimer % 60}s
                   </span>
-                </div>
+                )}
 
-                {/* Secure Sandbox Frame Node */}
-                <div className="flex-1 bg-black rounded-b-2xl overflow-hidden relative" id="sandbox-iframe-parent">
-                  <iframe
-                    key={`${selectedGameId}-${iframeKey}-${forceBlankMathMode}`}
-                    title={selectedGameData.title}
-                    src={forceBlankMathMode ? "about:blank#math" : undefined}
-                    srcDoc={forceBlankMathMode ? undefined : selectedGameData.html}
-                    onLoad={(e) => {
-                      if (forceBlankMathMode) {
-                        writeIframeContent(e.currentTarget);
-                      }
-                    }}
-                    className="w-full h-full border-none outline-none absolute inset-0 bg-transparent"
-                    sandbox="allow-scripts allow-same-origin allow-forms"
-                  />
+                <div className="text-xs font-bold font-mono text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-md">
+                  ACCURACY: {quizResults ? Math.round((quizResults.correctCount / (quizResults.answered || 1)) * 100) : 100}%
                 </div>
-
               </div>
 
-              {/* SIDE ALGEBRA SCRATCHPAD AND MATH CHEATSHEET */}
-              {!isFullscreen && (
-                <div className="col-span-1 flex flex-col gap-4 animate-fade-in">
+              {/* CARD SPACE (FLASHCARD FLIP MODE) */}
+              {practiceType === 'flashcard' && targetDeck[deckIndex] ? (
+                <div className="flex-1 flex flex-col justify-center items-center py-6">
                   
-                  {/* Notes panel */}
-                  <div className="bg-[#0f172a] rounded-2xl border border-slate-900 p-4 shadow-xl flex flex-col flex-1 min-h-[220px]">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-2 px-1">
-                      <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300">
-                        <BookOpen className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Algebra Study Notes</span>
+                  {/* Perspective Flip Frame */}
+                  <div className="perspective-1000 w-full max-w-sm h-52 relative">
+                    
+                    {/* Inner Rotate container */}
+                    <div 
+                      onClick={() => setIsFlipped(!isFlipped)}
+                      className={`w-full h-full rounded-3xl cursor-pointer transform-style-3d transition-transform duration-500 shadow-md border border-slate-200 absolute inset-0 bg-white ${
+                        isFlipped ? 'rotate-y-180' : ''
+                      }`}
+                    >
+                      {/* FRONT OF THE MATH CARD (Formula) */}
+                      <div className="backface-hidden w-full h-full flex flex-col justify-center items-center text-slate-800 p-6 absolute inset-0">
+                        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono mb-2">
+                          Standard Practice Card
+                        </span>
+                        
+                        <div className="text-5xl font-extrabold font-display select-none tracking-tight flex items-center gap-3">
+                          <span>{targetDeck[deckIndex].num1}</span>
+                          <span className="text-blue-500 font-medium">{targetDeck[deckIndex].operatorSymbol}</span>
+                          <span>{targetDeck[deckIndex].num2}</span>
+                        </div>
+
+                        <span className="text-[10px] text-blue-500 font-medium font-display mt-4 bg-blue-50/60 px-2.5 py-1 rounded-full animate-bounce">
+                          Click / Tap to Reveal Answer
+                        </span>
                       </div>
-                      <span className="text-[9px] text-[#64748b] bg-slate-950 border border-slate-800 px-2 py-0.5 rounded font-mono">
-                        Auto-Saves
-                      </span>
+
+                      {/* BACK OF THE MATH CARD (Evaluation) */}
+                      <div className="backface-hidden rotate-y-180 w-full h-full flex flex-col justify-center items-center text-slate-800 p-6 absolute inset-0 bg-slate-50 rounded-3xl">
+                        <span className="text-[10px] font-extrabold-blue-500 text-indigo-500 uppercase tracking-widest font-mono mb-2">
+                          Answer Calculation
+                        </span>
+
+                        <div className="text-5xl font-black font-display text-emerald-600 tracking-tight">
+                          {targetDeck[deckIndex].answer}
+                        </div>
+
+                        <p className="text-[10px] text-slate-450 mt-2 font-display">
+                          {targetDeck[deckIndex].num1} {targetDeck[deckIndex].operatorSymbol} {targetDeck[deckIndex].num2} = {targetDeck[deckIndex].answer}
+                        </p>
+                      </div>
+
                     </div>
-                    <textarea
-                      value={schoolNotes}
-                      onChange={(e) => handleNotesChange(e.target.value)}
-                      placeholder="Type formulas, notes, or classroom homework logs in school-friendly format..."
-                      className="w-full flex-1 bg-slate-950 border border-slate-900 text-xs text-slate-400 p-2.5 rounded-xl outline-none resize-none font-mono focus:border-cyan-500/50"
-                    />
+
                   </div>
 
-                  {/* Arithmetic calculator helper widget */}
-                  <div className="bg-[#0f172a] rounded-2xl border border-slate-900 p-4 shadow-xl flex flex-col">
-                    <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 border-b border-slate-800 pb-2.5 mb-2 px-1">
-                      <Laptop className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Classroom Utilities</span>
+                  {/* Manual Evaluation buttons on flip cards */}
+                  {isFlipped && (
+                    <div className="flex items-center gap-4 mt-6 w-full max-w-sm font-display animate-fade-in">
+                      <button
+                        onClick={() => handleFlashcardEvaluate(false)}
+                        className="flex-1 py-3 bg-rose-50 border border-rose-200 text-rose-700 font-bold rounded-2xl hover:bg-rose-100 transition-all cursor-pointer flex items-center justify-center gap-1"
+                      >
+                        <X className="w-4 h-4" /> Got it Wrong
+                      </button>
+
+                      <button
+                        onClick={() => handleFlashcardEvaluate(true)}
+                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 transition-all cursor-pointer shadow-sm shadow-emerald-100 flex items-center justify-center gap-1"
+                      >
+                        <Check className="w-4 h-4 stroke-[3px]" /> Got it Right!
+                      </button>
                     </div>
-                    <p className="text-[10px] text-[#64748b] leading-relaxed mb-3">
-                      Hit the <b>Escape key</b> immediately if a supervisor approaches. It instantly exchanges your screen to represent complete education worksheets.
-                    </p>
-                    <button
-                      onClick={() => {
-                        setIsCloaked(true);
-                        setSelectedCloak(CLOAK_PRESETS[3]); 
-                      }}
-                      className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-semibold py-2 rounded-xl transition-all cursor-pointer hover:text-white"
+                  )}
+
+                </div>
+              ) : practiceType === 'quiz' && targetDeck[deckIndex] ? (
+                /* SPEED QUIZ (INPUT SYSTEM) */
+                <div className="flex-1 flex flex-col justify-between py-2">
+                  
+                  {/* Active Question Panel */}
+                  <div className="text-center py-6 bg-slate-50/60 rounded-2xl border border-slate-100/60 relative overflow-hidden">
+                    {/* Evaluation Flash border overlay */}
+                    {evaluationFeedback && (
+                      <div className={`absolute inset-0 z-10 transition-colors opacity-10 ${
+                        evaluationFeedback === 'correct' ? 'bg-emerald-500' : 'bg-rose-500'
+                      }`} />
+                    )}
+
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block font-mono mb-1">
+                      Input the correct sum
+                    </span>
+
+                    <div className="text-4xl font-black font-display flex items-center justify-center gap-3">
+                      <span>{targetDeck[deckIndex].num1}</span>
+                      <span className="text-blue-500 font-medium">{targetDeck[deckIndex].operatorSymbol}</span>
+                      <span>{targetDeck[deckIndex].num2}</span>
+                      <span className="text-slate-400">=</span>
+                      <span className="bg-white border-2 border-slate-250 font-mono text-blue-600 px-4 py-1 rounded-xl shadow-3xs inline-block min-w-[70px] text-center text-3xl">
+                        {userInputsValue || '?'}
+                      </span>
+                    </div>
+
+                    {evaluationFeedback && (
+                      <div className="mt-2.5 animate-bounce">
+                        {evaluationFeedback === 'correct' ? (
+                          <span className="text-xs font-bold text-emerald-600 flex items-center justify-center gap-1">
+                            <Check className="w-4 h-4 stroke-[3px]" /> Correct! Well Done.
+                          </span>
+                        ) : (
+                          <span className="text-xs font-bold text-rose-600 flex items-center justify-center gap-1">
+                            <X className="w-4 h-4" /> Oops, Let's retry!
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Digital Keypad for streamlined calculation entries */}
+                  <div className="grid grid-cols-4 gap-2 mt-4 max-w-sm mx-auto w-full select-none font-display">
+                    {['1', '2', '3'].map((n) => (
+                      <button key={n} onClick={() => handleKeypadPress(n)} className="py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-sm font-semibold rounded-xl cursor-pointer transition-colors text-center">{n}</button>
+                    ))}
+                    <button onClick={() => handleKeypadPress('back')} className="py-2.5 bg-slate-100 hover:bg-slate-250 text-slate-600 text-xs font-bold rounded-xl cursor-pointer text-center flex items-center justify-center">Backspace</button>
+                    
+                    {['4', '5', '6'].map((n) => (
+                      <button key={n} onClick={() => handleKeypadPress(n)} className="py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-sm font-semibold rounded-xl cursor-pointer transition-colors text-center">{n}</button>
+                    ))}
+                    <button onClick={() => handleKeypadPress('minus')} className="py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-sm font-semibold rounded-xl cursor-pointer transition-colors text-center">±</button>
+                    
+                    {['7', '8', '9'].map((n) => (
+                      <button key={n} onClick={() => handleKeypadPress(n)} className="py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-sm font-semibold rounded-xl cursor-pointer transition-colors text-center">{n}</button>
+                    ))}
+                    <button onClick={() => handleKeypadPress('clear')} className="py-2.5 bg-slate-100 hover:bg-slate-200 text-rose-500 font-bold text-xs rounded-xl cursor-pointer text-center">Clear</button>
+
+                    <button onClick={() => handleKeypadPress('0')} className="col-span-2 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-sm font-semibold rounded-xl cursor-pointer transition-colors text-center">0</button>
+                    <button 
+                      onClick={handleAnswerSubmit} 
+                      className="col-span-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl cursor-pointer shadow-sm shadow-blue-100 flex items-center justify-center gap-1"
                     >
-                      Open Float Calculator Overlay
+                      Check Formula
                     </button>
                   </div>
 
+                </div>
+              ) : (
+                /* QUIZ COMPLAETED CONSOLE PANEL */
+                <div className="flex-1 flex flex-col justify-center items-center text-center p-6 space-y-4 font-display">
+                  <div className="w-14 h-14 bg-gradient-to-tr from-emerald-400 to-teal-500 text-white rounded-full flex items-center justify-center shadow-lg transform rotate-6">
+                    <Award className="w-7 h-7 stroke-[2.5px]" />
+                  </div>
+
+                  <h3 className="text-md font-bold text-slate-850">practice Session Completed!</h3>
+                  <p className="text-xs text-slate-450 max-w-sm">
+                    You checked {quizResults?.answered} formulas with a grand score of {quizResults?.correctCount} correct calculations. Great training!
+                  </p>
+
+                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl w-full max-w-xs text-xs space-y-1.5 font-mono text-left">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Total Cards Checked:</span>
+                      <strong className="text-slate-700">{quizResults?.answered}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Accurate Answers:</span>
+                      <strong className="text-emerald-600">{quizResults?.correctCount}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Total Spent Timer:</span>
+                      <strong className="text-slate-700">{quizTimer} seconds</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => { setScreen('dashboard'); playFeedbackTone('tap'); }}
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl cursor-pointer transition-all"
+                  >
+                    Finish Training Session
+                  </button>
                 </div>
               )}
 
             </div>
 
           </div>
-
         ) : (
-          
-          /* GAMES CATALOG HUB STAGE */
-          <div id="catalog-stage" className="flex flex-col space-y-6 flex-1">
+          /* ==================================================================== */
+          /* THE GAME WEBPAGE VAULT (Hidden Stealth Games Arena!)                */
+          /* ==================================================================== */
+          <div className="space-y-6 animate-fade-in flex flex-col flex-1 relative z-10 select-none">
             
-            {/* HERO PROMOTIONAL BLOCK */}
-            <div className="relative rounded-3xl bg-gradient-to-br from-[#121c33] via-[#0e1627] to-[#070b13] border border-slate-900 p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden shadow-2xl">
-              <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none"></div>
-              <div className="absolute bottom-0 left-10 w-80 h-80 bg-purple-500/5 rounded-full blur-3xl pointer-events-none"></div>
+            {/* SUB IFRAME GAME ACTIVE SCREEN */}
+            {selectedGame ? (
               
-              <div className="max-w-xl text-center md:text-left z-10">
-                <span className="text-[10px] font-mono tracking-widest text-[#a855f7] bg-purple-950/40 border border-purple-900 px-3 py-1 rounded-full font-bold uppercase">
-                  ✓ NO FLASH REQUIRED • HTML5 RETRO
-                </span>
-                <h2 className="text-2xl md:text-3xl font-extrabold text-white mt-3.5 tracking-tight leading-tight">
-                  YOUR UNBLOCKED DESKTOP COMPANION
-                </h2>
-                <p className="text-xs md:text-sm text-slate-400 mt-2.5 leading-relaxed">
-                  Fast browser-based performance, completely custom canvas builds. Integrated with dynamic educational tab-cloaks, ensuring safe loading backgrounds.
-                </p>
-                <div className="flex flex-wrap gap-2.5 mt-5 justify-center md:justify-start">
-                  <span className="text-[10px] bg-slate-900 border border-slate-800 text-[#a0aec0] px-3 py-1.5 rounded-xl font-mono">
-                    💡 Press <b>ESC</b> instantly to Panic-Hide!
-                  </span>
-                  <span className="text-[10px] bg-slate-900 border border-slate-800 text-[#a0aec0] px-3 py-1.5 rounded-xl font-mono">
-                    🛡️ Loaded in <b>about:blank#math</b> frames
-                  </span>
-                </div>
-              </div>
-
-              <div className="hidden lg:block relative text-7xl select-none animate-bounce duration-[4000ms] p-4 bg-slate-800/10 border border-slate-800/20 rounded-2xl">
-                🎮
-              </div>
-            </div>
-
-            {/* FILTERS AND SEARCH TRAY */}
-            <div className="flex flex-col md:flex-row items-stretch justify-between gap-3 bg-[#0f172a]/60 border border-slate-900/40 px-5 py-4 rounded-2xl shadow-xl">
-              
-              {/* Category buttons tab bar */}
-              <div className="flex flex-wrap items-center gap-1.5 order-2 md:order-1">
-                {['All Games', 'Classic', 'Arcade', 'Action', 'Math', 'Custom'].map((cat) => {
-                  const isActive = categoryFilter === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => {
-                        setCategoryFilter(cat);
-                        playTone(300 + (cat.charCodeAt(0) % 5) * 50, 0.05);
-                      }}
-                      className={`text-xs px-3.5 py-1.5 rounded-xl font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
-                        isActive 
-                          ? 'bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-md shadow-purple-950/50' 
-                          : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Search textbox */}
-              <div className="relative w-full md:w-72 order-1 md:order-2 flex items-center bg-slate-950 rounded-xl border border-slate-900 px-3 py-2 text-slate-400 focus-within:border-cyan-500/50 group">
-                <Search className="w-4 h-4 text-slate-500 mr-2 group-focus-within:text-cyan-400 transition-colors" />
-                <input
-                  type="text"
-                  placeholder="Search retro library..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-transparent border-0 outline-none text-xs text-[#f1f5f9] placeholder-slate-600 w-full"
-                />
-                {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className="text-slate-600 hover:text-white">
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-
-            </div>
-
-            {/* CATALOG CARDS GRID */}
-            {filteredGames.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="bg-slate-900 rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[650px] max-w-4xl mx-auto w-full border border-slate-850">
                 
-                {filteredGames.map((game) => (
-                  <div
-                    key={game.id}
-                    onClick={() => handleSelectGame(game.id)}
-                    className="relative group bg-[#0f172a] hover:bg-[#131d35] border border-slate-900/60 rounded-3xl p-5 cursor-pointer shadow-lg transition-all duration-300 transform hover:-translate-y-1 hover:shadow-2xl hover:shadow-cyan-950/10 flex flex-col justify-between"
-                  >
-                    
-                    <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-400/0 to-purple-500/0 group-hover:from-cyan-400/10 group-hover:to-purple-500/10 rounded-3xl transition duration-500 -z-10 blur-md"></div>
-                    
+                {/* Embedded control bar overlay */}
+                <div className="bg-slate-950 border-b border-slate-800 px-5 py-2.5 flex items-center justify-between text-slate-300">
+                  <div className="flex items-center space-x-3">
+                    <button
+                      onClick={() => { setSelectedGame(null); playFeedbackTone('tap'); }}
+                      className="p-1.5 px-3 border border-slate-705 bg-slate-800 hover:bg-slate-750 rounded-lg text-xs font-bold font-display cursor-pointer text-slate-200 transition-colors"
+                    >
+                      ← Back to Games Lobby
+                    </button>
                     <div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-3xl bg-slate-950 border border-slate-900 w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
-                          {getEmojiForIcon(game.icon)}
-                        </span>
+                      <h4 className="text-xs font-black tracking-tight text-white font-display leading-none">
+                        {selectedGame.name}
+                      </h4>
+                      <p className="text-[9px] text-slate-500 mt-1 uppercase font-mono tracking-wider">
+                        Running in direct sandboxed frame
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Evading utilities buttons */}
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => { setSelectedGame(null); setScreen('dashboard'); playFeedbackTone('tap'); }}
+                      className="p-1.5 px-3 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 rounded-lg text-[10px] font-bold cursor-pointer text-rose-200 transition-colors"
+                      title="Instantly clear and return to the Math Flashcards dashboard"
+                    >
+                      ❌ Quick Hide
+                    </button>
+                  </div>
+                </div>
+
+                {/* GAME FRAME PORTAL */}
+                <div className="flex-1 bg-black relative">
+                  <iframe 
+                    id={selectedGame.iframeId || "720a38057da8f08f_23"}
+                    name={selectedGame.iframeName || "720a38057da8f08f_23"}
+                    jsname={selectedGame.jsname || "WMhH6e"}
+                    src={selectedGame.url} 
+                    className="w-full h-full border-none block bg-slate-950"
+                    allowFullScreen
+                    frameBorder="0"
+                    scrolling="no"
+                    sandbox={selectedGame.sandbox || "allow-scripts allow-popups allow-forms allow-same-origin allow-popups-to-escape-sandbox allow-downloads allow-storage-access-by-user-activation"}
+                    title={selectedGame.name}
+                  />
+                </div>
+
+              </div>
+
+            ) : (
+              
+              /* MASTER LOBBY */
+              <div className="space-y-5 flex-1 flex flex-col">
+                
+                {/* COGNITO BANNER */}
+                <div className="bg-slate-900 text-white rounded-3xl p-5 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm relative overflow-hidden">
+                  <div className="space-y-1 z-10">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[10px] font-bold tracking-widest text-emerald-400 font-mono uppercase">
+                        Unblocked Games Portal (Inactive pre-builds)
+                      </span>
+                    </div>
+                    <h3 className="text-md font-bold font-display tracking-tight text-white">
+                      School Evasion Browser Console
+                    </h3>
+                    <p className="text-xs text-slate-400 leading-relaxed font-display">
+                      Add your custom html5 games! Use the built-in Tab Cloaking menu below to instantly disguise this webpage on your browser tab bar.
+                    </p>
+                  </div>
+
+                  {/* TAB DISGUISE PRESETS SELECTOR */}
+                  <div className="bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl flex flex-col gap-1.5 w-full md:w-auto min-w-[200px] z-10 text-xs text-slate-300 font-display">
+                    <label className="text-[9px] font-extrabold text-[#94a3b8] uppercase tracking-wider block leading-none">
+                      🔒 Tab Cloak Disguise Preset
+                    </label>
+                    <select
+                      value={cloakPreset}
+                      onChange={(e) => { setCloakPreset(e.target.value); playFeedbackTone('success'); }}
+                      className="bg-slate-900 border border-slate-700 py-1.5 px-2.5 rounded-lg text-white font-semibold text-xs focus:outline-none cursor-pointer w-full"
+                    >
+                      <option value="none">No Mask (Default UI)</option>
+                      <option value="drive">Disguise: Google Drive</option>
+                      <option value="classroom">Disguise: Google Classroom</option>
+                      <option value="docs">Disguise: Google Docs</option>
+                      <option value="canvas">Disguise: Canvas Dashboard</option>
+                      <option value="powerschool">Disguise: PowerSchool</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* GAME CATEGORY STRIP / SEARCH */}
+                <div className="bg-white border text-xs border-slate-150 p-4.5 rounded-3xl shadow-3xs flex flex-col md:flex-row items-center justify-between gap-4">
+                  
+                  {/* Category toggle strip */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {uniqueCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => { setSelectedCategory(cat); playFeedbackTone('tap'); }}
+                        className={`px-3 py-1.5 rounded-xl font-bold font-display cursor-pointer transition-all ${
+                          selectedCategory === cat 
+                            ? 'bg-blue-600 text-white shadow-2xs' 
+                            : 'bg-slate-100 hover:bg-slate-150 text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Search / Custom Actions */}
+                  <div className="flex items-center gap-2 w-full md:w-auto">
+                    <input
+                      type="text"
+                      placeholder="Search items..."
+                      value={gameSearch}
+                      onChange={(e) => setGameSearch(e.target.value)}
+                      className="bg-slate-100 border border-slate-200 outline-none px-3.5 py-1.5 rounded-xl text-xs text-slate-700 focus:bg-white focus:border-blue-500 w-full md:w-48 transition-colors"
+                    />
+
+                    <button
+                      onClick={() => { setShowGameManager(true); playFeedbackTone('tap'); }}
+                      className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1 shrink-0 px-3.5"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Games Link
+                    </button>
+                  </div>
+
+                </div>
+
+                {/* POPUP: ADD CUSTOM GAME ELEMENT OVERLAY */}
+                {showGameManager && (
+                  <div className="bg-white border-2 border-slate-150 p-5 rounded-3xl shadow-lg space-y-4 max-w-md mx-auto w-full animate-fade-in text-xs font-display">
+                    <div className="flex justify-between items-center border-b pb-2">
+                      <h4 className="font-extrabold text-slate-800 uppercase tracking-wider">Disguised Game Custom Loader</h4>
+                      <X className="w-4 h-4 text-slate-400 hover:text-slate-600 cursor-pointer" onClick={() => setShowGameManager(false)} />
+                    </div>
+
+                    <form onSubmit={handleAddLocalGame} className="space-y-3.5 text-xs text-slate-600">
+                      <div>
+                        <label className="block font-bold mb-1">Game Interface Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={mgmtGameName}
+                          onChange={(e) => setMgmtGameName(e.target.value)}
+                          placeholder="e.g. Retro Snake, Slope, Chess Unblocked"
+                          className="w-full bg-slate-50 border border-slate-205 py-2 px-3 rounded-xl outline-none focus:bg-white focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold mb-1">HTML5 Game URL or &lt;iframe&gt; Code Snippet</label>
+                        <input
+                          type="text"
+                          required
+                          value={mgmtGameUrl}
+                          onChange={(e) => setMgmtGameUrl(e.target.value)}
+                          placeholder="Paste game link URL OR raw <iframe> code snippet..."
+                          className="w-full bg-slate-50 border border-slate-205 py-2 px-3 rounded-xl outline-none focus:bg-white focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-bold mb-1">Category Group</label>
+                          <select
+                            value={mgmtGameCat}
+                            onChange={(e) => setMgmtGameCat(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-205 py-2 px-3 rounded-xl outline-none"
+                          >
+                            <option value="Arcade">Arcade</option>
+                            <option value="Puzzle">Puzzle</option>
+                            <option value="Action">Action</option>
+                            <option value="Sports">Sports</option>
+                            <option value="Retro">Retro</option>
+                          </select>
+                        </div>
                         
-                        <div className="flex items-center space-x-1.5">
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                            game.category === 'Custom' 
-                              ? 'bg-amber-950/30 text-amber-400 border-amber-900/50' 
-                              : game.category === 'Math'
-                              ? 'bg-blue-950/30 text-blue-400 border-blue-900/50'
-                              : 'bg-slate-950 text-slate-400 border-slate-800'
-                          }`}>
-                            {game.category}
-                          </span>
-                          
-                          {game.category === 'Custom' && (
-                            <button
-                              onClick={(e) => handleDeleteCustomGame(game.id, e)}
-                              title="Delete Imported Game"
-                              className="text-slate-500 hover:text-red-400 hover:bg-slate-950 p-1 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                        <div>
+                          <label className="block font-bold mb-1">Discretion</label>
+                          <span className="block text-[10px] text-slate-400 pt-2 font-mono">Loads instantly in responsive sandboxed frame</span>
                         </div>
                       </div>
 
-                      <h3 className="font-bold text-base text-white mt-4 tracking-wide group-hover:text-cyan-400 transition-colors">
-                        {game.title}
-                      </h3>
-                      
-                      <p className="text-xs text-slate-400 mt-2.5 leading-relaxed line-clamp-3">
-                        {game.description}
+                      <div>
+                        <label className="block font-bold mb-1">Description (Optional)</label>
+                        <textarea
+                          value={mgmtGameDesc}
+                          onChange={(e) => setMgmtGameDesc(e.target.value)}
+                          placeholder="Brief description of instructions..."
+                          className="w-full bg-slate-50 border border-slate-205 py-2 px-3 rounded-xl outline-none focus:bg-white focus:border-blue-500 h-16 resize-none"
+                        />
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowGameManager(false)}
+                          className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl cursor-pointer text-center"
+                        >
+                          Cancel
+                        </button>
+                        
+                        <button
+                          type="submit"
+                          className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-705 text-white font-bold rounded-xl cursor-pointer text-center"
+                        >
+                          Load Game Link
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* RENDERED GAMES GRID */}
+                {filteredGames.length > 0 ? (
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4.5">
+                    {filteredGames.map((game) => (
+                      <div 
+                        key={game.id}
+                        className="bg-white border border-slate-200 p-4.5 rounded-3xl flex flex-col justify-between shadow-3xs hover:shadow-2xs hover:border-blue-300 transition-all text-xs"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="bg-slate-100 border border-slate-200 text-slate-500 font-mono font-bold text-[8.5px] uppercase px-1.5 py-0.5 rounded">
+                              {game.category}
+                            </span>
+
+                            {game.isLocal && (
+                              <button
+                                onClick={() => deleteLocalGame(game.id)}
+                                className="text-slate-350 hover:text-rose-600 transition-colors p-1"
+                                title="Remove game item"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          <h4 className="font-extrabold text-slate-800 text-sm tracking-tight">{game.name}</h4>
+                          <p className="text-[10px] text-slate-400 line-clamp-2 leading-relaxed">{game.description}</p>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-4 border-t border-slate-100/80 mt-2">
+                          <button
+                            onClick={() => { setSelectedGame(game); playFeedbackTone('success'); }}
+                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-center cursor-pointer transition-colors shadow-sm shadow-indigo-100"
+                          >
+                            🎮 Play Game
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                ) : (
+                  
+                  /* Empty state message specifically explaining how the user puts inside their own */
+                  <div className="bg-white border-2 border-dashed border-slate-200 rounded-3xl p-10 text-center space-y-4 max-w-lg mx-auto w-full font-display">
+                    <div className="w-12 h-12 bg-slate-100 text-slate-500 rounded-2xl flex items-center justify-center mx-auto shadow-3xs">
+                      <Gamepad2 className="w-6 h-6" />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <h4 className="font-extrabold text-slate-800">Your Games Library is Ready</h4>
+                      <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
+                        To add your library of games, either commit custom game configurations to `/public/games/index.json` in your GitHub repository, or add browser links instantly using the <strong>"Add Games Link"</strong> manager above.
                       </p>
                     </div>
 
-                    <div className="mt-5 pt-4 border-t border-slate-900/50 flex items-center justify-between text-slate-500">
-                      <span className="text-[10px] font-mono text-slate-600">
-                        {game.useBlankMath ? 'Cloak Evasion: Frame#math' : 'Standard Web Frame'}
-                      </span>
-                      <span className="text-xs font-semibold text-cyan-400/80 group-hover:text-cyan-400 flex items-center group-hover:translate-x-1.5 transition-all">
-                        Launch Play <ChevronRight className="w-4 h-4 ml-0.5" />
-                      </span>
+                    <div className="p-3 bg-slate-50 border border-slate-150 rounded-2xl text-[10px] text-slate-500 text-left font-mono space-y-1">
+                      <span className="font-bold text-slate-700 block uppercase mb-1">📄 Format of /games/index.json:</span>
+                      <span>[</span>
+                      <span className="pl-4 block">{"{"}</span>
+                      <span className="pl-8 block">"id": "pong",</span>
+                      <span className="pl-8 block">"name": "Pong",</span>
+                      <span className="pl-8 block">"url": "https://playcanv.as/p/2O97ar6p/",</span>
+                      <span className="pl-8 block">"category": "Arcade",</span>
+                      <span className="pl-8 block">"description": "Retro paddle tennis"</span>
+                      <span className="pl-4 block">{"}"}</span>
+                      <span>]</span>
                     </div>
 
+                    <div className="pt-2">
+                      <button
+                        onClick={() => { setShowGameManager(true); playFeedbackTone('tap'); }}
+                        className="px-5 py-2.5 bg-indigo-650 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+                      >
+                        Add Game Link Now
+                      </button>
+                    </div>
                   </div>
-                ))}
+
+                )}
 
               </div>
-            ) : (
-              <div className="py-20 flex flex-col items-center justify-center text-slate-500 bg-[#0f172a]/20 border border-slate-900/20 rounded-3xl">
-                <span className="text-4xl">📭</span>
-                <p className="text-sm font-semibold mt-4">We couldn't find any games matching those search tags.</p>
-                <button 
-                  onClick={() => { setSearchQuery(''); setCategoryFilter('All Games'); }} 
-                  className="mt-3.5 text-xs text-cyan-400 hover:underline"
-                >
-                  Clear catalog filters
-                </button>
-              </div>
+
             )}
 
-            {/* HELPFUL FAQ AREA */}
-            <section className="bg-[#0f172a]/25 border border-slate-900/30 p-5 rounded-3xl mt-6">
-              <h3 className="text-xs font-bold text-[#64748b] tracking-wider uppercase mb-3 text-center md:text-left">
-                Unblocked Hub — Operational Manual
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-[11px] text-slate-400 leading-relaxed">
-                <div>
-                  <h4 className="font-bold text-slate-300 border-l border-cyan-500 pl-2 mb-1">What is about:blank#math?</h4>
-                  <p>School block filters inspect URLs parsed inside internet histories. This portal encapsulates game engines nested inside blank iframes, hiding game assets beneath harmless educational hashtags.</p>
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-300 border-l border-purple-500 pl-2 mb-1">How can I escape school monitors?</h4>
-                  <p>In case of emergencies, hit the <b>ESC</b> hotkey immediately. This replaces your entire portal viewport with interactive Google Docs or Calculus Calculators without losing game records.</p>
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-300 border-l border-amber-500 pl-2 mb-1">Can I add generic web games?</h4>
-                  <p>Yes! Click the <b>Import Custom Game</b> button above, tag the title, and copy the unified HTML script structure inside to run custom sandbox games inside your browser.</p>
-                </div>
-              </div>
-            </section>
-
           </div>
-
         )}
 
       </main>
 
-      {/* FOOTER BAR */}
-      <footer className="mt-auto border-t border-slate-900/60 bg-[#060a11] py-4 px-6 text-center text-[10px] text-slate-600">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2.5">
-          <p>Unblocked Hub © 2026 • Encrypted offline sandbox structure</p>
-          <div className="flex space-x-3">
-            <span className="hover:text-slate-400">Classroom Proxy</span>
+      {/* FOOTER */}
+      <footer className="bg-white border-t border-slate-100 py-3.5 px-6 font-display text-[9.5px] text-slate-400 select-none">
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+          <span>
+            © {new Date().getFullYear()} Math Training Center. Loaded fully on-client.
+          </span>
+          <div className="flex items-center space-x-3 text-slate-400">
+            <span className="font-mono">Privacy Locked (AES-256 in-browser sandbox)</span>
             <span>•</span>
-            <span className="hover:text-slate-400">Evasion Frames V2</span>
-            <span>•</span>
-            <span className="hover:text-slate-400 cursor-pointer" onClick={() => {
-              if (confirm("Reset application local storage cache? This deletes imported games.")) {
-                localStorage.clear();
-                window.location.reload();
-              }
-            }}>Clear Memory Cache</span>
+            <button 
+              onClick={() => { setScreen('stealth-console'); playFeedbackTone('tap'); }} 
+              className="hover:underline hover:text-blue-500 cursor-pointer text-[9.5px] font-bold"
+            >
+              Interactive Console Backdoor
+            </button>
           </div>
         </div>
       </footer>
-
-      {/* ADD CUSTOM GAME POPUP MODAL */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-[#020617]/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] border border-slate-900 w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden p-6 animate-fade-in flex flex-col space-y-4 max-h-[90vh]">
-            
-            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
-              <div className="flex items-center space-x-2">
-                <span className="text-xl">📥</span>
-                <h3 className="font-bold text-md text-white">Import Custom Playable HTML Game</h3>
-              </div>
-              <button 
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-white bg-slate-900/50 p-1 px-2.5 rounded-lg border border-slate-800"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3.5 flex-1 overflow-y-auto pr-1">
-              <div>
-                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Game Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Cyber TicTacToe"
-                  value={newGameTitle}
-                  onChange={(e) => setNewGameTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-900 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-cyan-500/50 outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Category</label>
-                  <select
-                    value={newGameCat}
-                    onChange={(e) => setNewGameCat(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-900 rounded-xl px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/50 outline-none"
-                  >
-                    <option value="Classic">Classic</option>
-                    <option value="Arcade">Arcade</option>
-                    <option value="Action">Action</option>
-                    <option value="Math">Math</option>
-                  </select>
-                </div>
-                <div className="flex items-center pt-5 pl-1 select-none">
-                  <label className="flex items-center cursor-pointer text-xs text-slate-400">
-                    <input
-                      type="checkbox"
-                      checked={newGameUseBlank}
-                      onChange={(e) => setNewGameUseBlank(e.target.checked)}
-                      className="mr-2 accent-cyan-400"
-                    />
-                    Force about:blank#math Sandbox
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Short Description</label>
-                <input
-                  type="text"
-                  placeholder="Explain gameplay details..."
-                  value={newGameDesc}
-                  onChange={(e) => setNewGameDesc(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-900 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-cyan-500/50 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">HTML, CSS, JS Content</label>
-                <p className="text-[9px] text-[#64748b] leading-tight mb-1.5">Paste standalone, complete HTML code containing index script styles which runs smoothly in static browsers.</p>
-                <textarea
-                  placeholder="<!DOCTYPE html><html><head><style>...</style></head><body>...</body></html>"
-                  value={newGameCode}
-                  onChange={(e) => setNewGameCode(e.target.value)}
-                  rows={8}
-                  className="w-full bg-slate-950 border border-slate-900 rounded-xl px-3 py-2 text-xs text-slate-300 placeholder-slate-700 focus:border-cyan-500/50 outline-none font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-900/50">
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="bg-slate-900 text-slate-400 hover:text-white border border-slate-800 py-2 px-4 rounded-xl text-xs transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddCustomGame}
-                disabled={!newGameTitle || !newGameCode}
-                className="bg-[#10b981] disabled:bg-slate-800 disabled:text-slate-600 hover:bg-[#0ea271] text-slate-950 font-bold py-2 px-5 rounded-xl text-xs transition-colors cursor-pointer"
-              >
-                Save to Catalog
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
 
     </div>
   );
